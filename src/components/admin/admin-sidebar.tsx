@@ -8,6 +8,7 @@ import {
   CalendarRange,
   Building2,
   Users,
+  UserCog,
   Settings,
   LogOut,
   Zap,
@@ -22,6 +23,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
   { href: "/sessions", label: "Academic Sessions", icon: <CalendarRange size={18} />, superAdminOnly: true },
   { href: "/departments", label: "Departments", icon: <Building2 size={18} />, superAdminOnly: true },
+  { href: "/admins", label: "Admin Management", icon: <UserCog size={18} />, superAdminOnly: true },
   { href: "/students", label: "Students", icon: <Users size={18} /> },
   { href: "/settings", label: "Account Settings", icon: <Settings size={18} /> },
 ];
@@ -43,7 +45,7 @@ export function AdminSidebar({ userName, role }: { userName: string; role: strin
           <Zap size={18} className="text-white" />
         </div>
         <div>
-          <p className="text-sm font-bold leading-tight text-admin-text">UMaT DUES</p>
+          <p className="text-sm font-bold leading-tight text-admin-text">UMaT SRC</p>
           <p className="text-xs leading-tight text-admin-muted">Admin Portal</p>
         </div>
         <button
@@ -107,7 +109,7 @@ export function AdminSidebar({ userName, role }: { userName: string; role: strin
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-admin-accent to-admin-accentDark">
           <Zap size={16} className="text-white" />
         </div>
-        <p className="text-sm font-bold text-admin-text">UMaT DUES</p>
+        <p className="text-sm font-bold text-admin-text">UMaT SRC</p>
       </div>
 
       {/* Mobile off-canvas drawer + backdrop */}

@@ -66,7 +66,7 @@ ENCRYPTION_KEY="..."
 CRON_SECRET="..."
 ```
 
-If email/SMS/Sentry are not needed tomorrow, they can remain unset.
+If email/SMS/Sentry are not needed for launch, they can remain unset. `SENTRY_DSN` is optional error monitoring. `CRON_SECRET` protects the scheduled payment-reconciliation endpoint; generate a random value with `openssl rand -hex 32`. `ENCRYPTION_KEY` must be a base64-encoded 32-byte key (`openssl rand -base64 32`) before saving Paystack/SMS secrets through the admin UI. SMS provider API credentials and sender ID are configured in the admin's SRC SMS Settings; setting `SMS_PROVIDER` alone does not supply an API key. Email delivery requires `EMAIL_PROVIDER=BREVO`, `EMAIL_API_KEY`, and a verified `EMAIL_FROM_ADDRESS` if receipts should be emailed.
 
 ### 3. Deploy
 
@@ -78,14 +78,23 @@ prisma migrate deploy && next build
 
 The included migration adds the SRC payment line-item JSON field.
 
-### 4. Create the SRC admin
+### 4. Create the first Super Admin (required)
 
-Set these temporarily when running the seed:
+Set these environment variables before running the seed. Use a unique password of at least 12 characters.
+
+```env
+SRC_SUPER_ADMIN_EMAIL="your-super-admin-email"
+SRC_SUPER_ADMIN_PASSWORD="a-unique-password-at-least-12-characters"
+```
+
+Optionally create the first day-to-day Admin at the same time:
 
 ```env
 SRC_ADMIN_EMAIL="your-admin-email"
-SRC_ADMIN_PASSWORD="your-strong-password"
+SRC_ADMIN_PASSWORD="another-unique-password-at-least-12-characters"
 ```
+
+Run `npm run prisma:seed` once against the production Neon database. The seed creates the SRC department, the Super Admin, and the optional initial Admin. Afterward, the Super Admin can create additional Admins at `/admins`; no redeploy or environment change is needed for future Admin accounts. Do not expose a public Super Admin registration route and do not commit real credentials.
 
 Then run:
 
@@ -109,7 +118,7 @@ Set:
 - Environment: Live
 - Public Key
 - Secret Key
-- Webhook Secret, if your Paystack setup provides/uses one
+- No separate webhook secret is required for Paystack: the webhook signature is HMAC-SHA512 verified with the Paystack Secret Key. (The separate webhook-secret field is used by other providers in the inherited multi-provider engine.)
 - Paystack Subaccount Code: `ACCT_...`
 
 The secret values are encrypted before being stored.
@@ -122,7 +131,7 @@ Configure Paystack to send events to:
 https://your-domain.com/api/webhooks/paystack
 ```
 
-The webhook is verified with the Paystack secret and the transaction is re-verified directly with Paystack before the payment is marked successful.
+The webhook is verified using the Paystack Secret Key (the `x-paystack-signature` is an HMAC-SHA512 signature). The URL is where Paystack sends the event; it is not itself a secret. The transaction is then re-verified directly with Paystack before the payment is marked successful.
 
 ## Important
 
