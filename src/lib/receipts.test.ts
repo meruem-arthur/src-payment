@@ -1,0 +1,310 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    payment: { findUniqueOrThrow: vi.fn() },
+    receipt: { findUnique: vi.fn(), count: vi.fn() },
+    student: { update: vi.fn() },
+    notificationLog: { create: vi.fn() },
+    $transaction: vi.fn(),
+  },
+}));
+
+vi.mock("@/lib/sms/provider-factory", () => ({
+  getSmsProvider: vi.fn(),
+}));
+
+vi.mock("@/lib/email/provider-factory", () => ({
+  getEmailProvider: vi.fn(),
+}));
+
+import { prisma } from "@/lib/db";
+import { getSmsProvider } from "@/lib/sms/provider-factory";
+import { getEmailProvider } from "@/lib/email/provider-factory";
+import { issueReceiptAndNotify, issueReceipt, sendReceiptNotifications } from "@/lib/receipts";
+
+const mockedPrisma = vi.mocked(prisma, true);
+const mockedGetSmsProvider = vi.mocked(getSmsProvider);
+const mockedGetEmailProvider = vi.mocked(getEmailProvider);
+
+const successPayment = {
+  id: "payment_1",
+  studentId: "student_1",
+  amount: { toString: () => "100" }, // Number() on this works via toString below (see toNumberish note)
+  currency: "GHS",
+  paymentType: "CONTINUING",
+  provider: "PAYSTACK",
+  paidAt: new Date("2026-09-13T09:00:00Z"),
+  status: "SUCCESS",
+  student: { fullName: "Kwame Mensah", referenceNumber: "REF001", phone: "0551234567", level: "L300", email: "kwame@example.com" },
+  academicSession: { name: "2026/2027" },
+  department: {
+    name: "Ceramic Engineering",
+    logoUrl: null,
+    financialSecretaryName: null,
+    financialSecretarySignatureUrl: null,
+    presidentName: null,
+    presidentSignatureUrl: null,
+    smsConfig: {
+      enabled: true,
+      senderId: "UMAT",
+      apiKey: "key", // plaintext / unencrypted - exercises the legacy-passthrough path in decryptSmsApiKey
+      username: "user",
+      messageTemplate: "{name}, {department} dues of GHS {amount} received. Level {level}. Ref {reference}. {receipt}",
+    },
+    emailConfig: {
+      enabled: true,
+      fromAddress: "dues@umat.edu.gh",
+      emailTemplate: "Dear {name}, your payment of GHS {amount} for {department} was received. Ref {reference}. Receipt {receipt}.",
+    },
+  },
+};
+
+// Payment.amount is a Prisma Decimal in production; Number(decimal) works via
+// its custom toString/valueOf. Plain numbers behave identically for Number(),
+// so tests use plain numbers to avoid pulling in the Decimal class.
+const successPaymentAmount100 = { ...successPayment, amount: 100 };
+
+let txMock: { receipt: { create: ReturnType<typeof vi.fn> }; student: { update: ReturnType<typeof vi.fn> } };
+let smsSend: ReturnType<typeof vi.fn>;
+let emailSend: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+
+  mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue(successPaymentAmount100 as any);
+  mockedPrisma.receipt.findUnique.mockResolvedValue(null);
+  mockedPrisma.receipt.count.mockResolvedValue(5);
+  mockedPrisma.notificationLog.create.mockResolvedValue({} as any);
+
+  txMock = {
+    receipt: {
+      create: vi.fn().mockResolvedValue({ id: "receipt_1", receiptNumber: "REC-2026-000006", issuedAt: new Date("2026-09-13T09:00:00Z") }),
+    },
+    student: { update: vi.fn().mockResolvedValue({}) },
+  };
+  mockedPrisma.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+
+  smsSend = vi.fn().mockResolvedValue({ success: true, providerMessageId: "sms_1" });
+  mockedGetSmsProvider.mockReturnValue({ send: smsSend } as any);
+
+  emailSend = vi.fn().mockResolvedValue({ success: true });
+  mockedGetEmailProvider.mockReturnValue({ send: emailSend } as any);
+});
+
+describe("issueReceiptAndNotify", () => {
+  it("throws if the payment is not SUCCESS", async () => {
+    mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue({ ...successPaymentAmount100, status: "PENDING" } as any);
+
+    await expect(issueReceiptAndNotify("payment_1")).rejects.toThrow(/not SUCCESS/i);
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent - returns the existing receipt without creating a new one", async () => {
+    const existing = { id: "receipt_existing", receiptNumber: "REC-2026-000003" };
+    mockedPrisma.receipt.findUnique.mockResolvedValue(existing as any);
+
+    const result = await issueReceiptAndNotify("payment_1");
+
+    expect(result).toBe(existing);
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
+    expect(smsSend).not.toHaveBeenCalled();
+    expect(emailSend).not.toHaveBeenCalled();
+  });
+
+  it("creates the receipt, marks the student paid, and sends the SMS with the right details", async () => {
+    await issueReceiptAndNotify("payment_1");
+
+    expect(txMock.receipt.create).toHaveBeenCalledWith({
+      data: { receiptNumber: "REC-2026-000006", paymentId: "payment_1", studentId: "student_1", departmentId: undefined },
+    });
+    expect(txMock.student.update).toHaveBeenCalledWith({
+      where: { id: "student_1" },
+      data: { paymentStatus: "SUCCESS" },
+    });
+
+    expect(smsSend).toHaveBeenCalledTimes(1);
+    const [sentMessage] = smsSend.mock.calls[0];
+    // Level is shown without the leading "L", amount without currency symbol,
+    // and the receipt number is included.
+    expect(sentMessage.message).toContain("Level 300");
+    expect(sentMessage.message).toContain("GHS 100");
+    expect(sentMessage.message).toContain("REC-2026-000006");
+    expect(sentMessage.to).toBe("0551234567");
+  });
+
+  it("never sends duplicate quotes for a whole number amount (no trailing .00)", async () => {
+    await issueReceiptAndNotify("payment_1");
+    const [sentMessage] = smsSend.mock.calls[0];
+    expect(sentMessage.message).not.toContain("100.00");
+  });
+
+  it("does not send SMS when the department's SMS config is disabled", async () => {
+    mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue({
+      ...successPaymentAmount100,
+      department: { ...successPaymentAmount100.department, smsConfig: { ...successPaymentAmount100.department.smsConfig, enabled: false } },
+    } as any);
+
+    await issueReceiptAndNotify("payment_1");
+
+    expect(smsSend).not.toHaveBeenCalled();
+  });
+
+  it("does not throw and still returns the receipt when SMS sending fails", async () => {
+    smsSend.mockRejectedValue(new Error("SMS gateway down"));
+
+    const result = await issueReceiptAndNotify("payment_1");
+
+    expect(result).toEqual(expect.objectContaining({ id: "receipt_1" }));
+  });
+
+  it("sends an email receipt when emailConfig is enabled and the student has an email on file", async () => {
+    await issueReceiptAndNotify("payment_1");
+
+    expect(emailSend).toHaveBeenCalledTimes(1);
+    const [sentEmail] = emailSend.mock.calls[0];
+    expect(sentEmail.to).toBe("kwame@example.com");
+    expect(sentEmail.subject).toContain("REC-2026-000006");
+    expect(sentEmail.body).toContain("GHS 100");
+    expect(sentEmail.body).toContain("REC-2026-000006");
+    expect(sentEmail.from).toBe("dues@umat.edu.gh");
+    expect(sentEmail.attachments).toHaveLength(1);
+    expect(sentEmail.attachments[0].filename).toBe("REC-2026-000006.pdf");
+    expect(sentEmail.attachments[0].content).toBeInstanceOf(Buffer);
+  });
+
+  it("does not send an email when the department's email config is disabled", async () => {
+    mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue({
+      ...successPaymentAmount100,
+      department: { ...successPaymentAmount100.department, emailConfig: { ...successPaymentAmount100.department.emailConfig, enabled: false } },
+    } as any);
+
+    await issueReceiptAndNotify("payment_1");
+
+    expect(emailSend).not.toHaveBeenCalled();
+  });
+
+  it("does not send an email when the student has no email on file, even if enabled", async () => {
+    mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue({
+      ...successPaymentAmount100,
+      student: { ...successPaymentAmount100.student, email: null },
+    } as any);
+
+    await issueReceiptAndNotify("payment_1");
+
+    expect(emailSend).not.toHaveBeenCalled();
+  });
+
+  it("does not throw and still returns the receipt when email sending fails", async () => {
+    emailSend.mockRejectedValue(new Error("Email gateway down"));
+
+    const result = await issueReceiptAndNotify("payment_1");
+
+    expect(result).toEqual(expect.objectContaining({ id: "receipt_1" }));
+  });
+
+  it("logs the email notification with the EMAIL channel", async () => {
+    await issueReceiptAndNotify("payment_1");
+
+    expect(mockedPrisma.notificationLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ channel: "EMAIL", recipient: "kwame@example.com", status: "SENT" }),
+    });
+  });
+});
+
+describe("issueReceipt", () => {
+  it("throws if the payment is not SUCCESS, without touching the database", async () => {
+    mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue({ ...successPaymentAmount100, status: "PENDING" } as any);
+
+    await expect(issueReceipt("payment_1")).rejects.toThrow(/not SUCCESS/i);
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("creates the receipt, marks the student paid, and reports created: true - without sending anything", async () => {
+    const result = await issueReceipt("payment_1");
+
+    expect(result.created).toBe(true);
+    expect(result.receipt.receiptNumber).toBe("REC-2026-000006");
+    expect(txMock.student.update).toHaveBeenCalledWith({
+      where: { id: "student_1" },
+      data: { paymentStatus: "SUCCESS" },
+    });
+    // Sending is a separate, background step - issuing must stay database-only.
+    expect(smsSend).not.toHaveBeenCalled();
+    expect(emailSend).not.toHaveBeenCalled();
+  });
+
+  it("returns the existing receipt with created: false when one already exists", async () => {
+    const existing = { id: "receipt_existing", receiptNumber: "REC-2026-000003" };
+    mockedPrisma.receipt.findUnique.mockResolvedValue(existing as any);
+
+    const result = await issueReceipt("payment_1");
+
+    expect(result).toEqual({ receipt: existing, created: false });
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("when it loses a race for the SAME payment, returns the winner's receipt as created: false", async () => {
+    const winner = { id: "receipt_winner", receiptNumber: "REC-2026-000006" };
+    // First lookup (before creating): nothing yet. After the insert fails: the winner is there.
+    mockedPrisma.receipt.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(winner as any);
+    mockedPrisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("Unique constraint"), { code: "P2002" }));
+
+    const result = await issueReceipt("payment_1");
+
+    expect(result).toEqual({ receipt: winner, created: false });
+  });
+
+  it("when only the receipt NUMBER collided (different payment won it), regenerates and retries", async () => {
+    // Nobody has a receipt for THIS payment, so after the first insert collides we try again.
+    mockedPrisma.receipt.findUnique.mockResolvedValue(null);
+    mockedPrisma.receipt.count.mockResolvedValueOnce(5).mockResolvedValueOnce(6);
+    mockedPrisma.$transaction
+      .mockRejectedValueOnce(Object.assign(new Error("Unique constraint"), { code: "P2002" }))
+      .mockImplementationOnce(async (cb: any) => cb(txMock));
+    txMock.receipt.create.mockResolvedValue({ id: "receipt_2", receiptNumber: "REC-2026-000007", issuedAt: new Date() });
+
+    const result = await issueReceipt("payment_1");
+
+    expect(result.created).toBe(true);
+    expect(mockedPrisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mockedPrisma.receipt.count).toHaveBeenCalledTimes(2);
+  });
+
+  it("rethrows errors that are not unique-constraint collisions", async () => {
+    mockedPrisma.$transaction.mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(issueReceipt("payment_1")).rejects.toThrow("connection lost");
+  });
+});
+
+describe("sendReceiptNotifications", () => {
+  const withReceipt = {
+    ...successPaymentAmount100,
+    receipt: { receiptNumber: "REC-2026-000006", issuedAt: new Date("2026-09-13T09:00:00Z") },
+  };
+
+  it("sends SMS and email for an existing receipt without creating one", async () => {
+    mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue(withReceipt as any);
+
+    const results = await sendReceiptNotifications("payment_1");
+
+    expect(results).toEqual({ sms: "SENT", email: "SENT" });
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
+    expect(smsSend.mock.calls[0][0].message).toContain("REC-2026-000006");
+  });
+
+  it("throws when there is no receipt yet", async () => {
+    await expect(sendReceiptNotifications("payment_1")).rejects.toThrow(/hasn't succeeded|receipt/i);
+  });
+
+  it("an SMS failure does not stop the email", async () => {
+    mockedPrisma.payment.findUniqueOrThrow.mockResolvedValue(withReceipt as any);
+    smsSend.mockRejectedValue(new Error("SMS gateway down"));
+
+    const results = await sendReceiptNotifications("payment_1");
+
+    expect(results.sms).toBe("FAILED");
+    expect(results.email).toBe("SENT");
+  });
+});

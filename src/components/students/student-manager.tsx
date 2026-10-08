@@ -1,0 +1,766 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { RefreshCw } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
+
+type Student = {
+  id: string;
+  fullName: string;
+  referenceNumber: string;
+  studentIndexNo: string | null;
+  level: string;
+  phone: string;
+  email: string | null;
+  paymentStatus: string;
+  hasPendingPayment: boolean;
+  lastFailedPayment: { reason: string | null; failedAt: string } | null;
+  registrationSource: "ADMIN" | "SELF";
+  isExempt: boolean;
+  exemptReason: string | null;
+};
+
+const emptyForm = {
+  fullName: "",
+  referenceNumber: "",
+  studentIndexNo: "",
+  level: "L100",
+  phone: "",
+  email: "",
+};
+
+export function StudentManager({
+  departmentId,
+  academicSessionId,
+  isSuperAdmin = false,
+}: {
+  departmentId?: string;
+  academicSessionId: string;
+  // Only the super admin gets the clearance controls. This is UI only - the
+  // /exempt, /clearance-receipt and resend routes enforce it server-side.
+  isSuperAdmin?: boolean;
+}) {
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [levelFilter, setLevelFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [exemptFilter, setExemptFilter] = useState("");
+
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [addForm, setAddForm] = useState(emptyForm);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  // ---- Edit dialog state -------------------------------------------------
+  // CRITICAL: `editingStudentId` tracks which record is open. `editForm` is a
+  // LOCAL COPY that the user mutates freely. We never write back to
+  // `students` (the source of truth from the DB) until the server confirms
+  // a successful save. Closing the dialog (Cancel or the X) only clears
+  // this local state - it performs zero network writes and therefore can
+  // never clear or corrupt the underlying database record.
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState(emptyForm);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const [showCsvDialog, setShowCsvDialog] = useState(false);
+
+  const fetchStudents = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
+    const params = new URLSearchParams();
+    if (departmentId) params.set("departmentId", departmentId);
+    if (search) params.set("search", search);
+    if (levelFilter) params.set("level", levelFilter);
+    if (statusFilter) params.set("paymentStatus", statusFilter);
+    if (sourceFilter) params.set("registrationSource", sourceFilter);
+    if (exemptFilter) params.set("exempt", exemptFilter);
+    try {
+      const res = await fetch(`/api/students?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFetchError(data?.error ?? `Failed to load students (HTTP ${res.status})`);
+        setStudents([]);
+        return;
+      }
+      setStudents(data.students ?? []);
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : "Failed to load students (network error)");
+      setStudents([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [departmentId, search, levelFilter, statusFilter, sourceFilter, exemptFilter]);
+
+  useEffect(() => {
+    fetchStudents();
+  }, [fetchStudents]);
+
+  function openEditDialog(student: Student) {
+    // Populate the LOCAL form copy from the database record. This does not
+    // touch the server in any way.
+    setEditForm({
+      fullName: student.fullName,
+      referenceNumber: student.referenceNumber,
+      studentIndexNo: student.studentIndexNo ?? "",
+      level: student.level,
+      phone: student.phone,
+      email: student.email ?? "",
+    });
+    setEditError(null);
+    setEditingStudentId(student.id);
+  }
+
+  function closeEditDialog() {
+    // Cancel: discard the local copy only. NO API call happens here.
+    setEditingStudentId(null);
+    setEditForm(emptyForm);
+    setEditError(null);
+  }
+
+  async function saveEdit() {
+    if (!editingStudentId) return;
+    setSaving(true);
+    setEditError(null);
+    const res = await fetch(`/api/students/${editingStudentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(editForm),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setEditError(data.error ?? "Could not save changes");
+      return;
+    }
+    closeEditDialog();
+    fetchStudents();
+  }
+
+  async function deleteStudent(id: string) {
+    if (!confirm("Delete this student? This cannot be undone.")) return;
+    await fetch(`/api/students/${id}`, { method: "DELETE" });
+    fetchStudents();
+  }
+
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
+
+  async function deleteAllStudents() {
+    if (!departmentId) return;
+    if (
+      !confirm(
+        "Delete ALL students in this department? Anyone with a payment or receipt on record will be skipped and kept. This cannot be undone for the rest."
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setBulkResult(null);
+    try {
+      const res = await fetch(`/api/students?departmentId=${departmentId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBulkResult(data.error ?? "Could not delete students");
+        return;
+      }
+      setBulkResult(
+        `Deleted ${data.deletedCount} student(s).` +
+          (data.skippedCount ? ` Skipped ${data.skippedCount} with existing payments/receipts.` : "")
+      );
+      fetchStudents();
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<{ id: string; text: string } | null>(null);
+
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resendResult, setResendResult] = useState<{ id: string; text: string } | null>(null);
+
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [checkResult, setCheckResult] = useState<{ id: string; text: string; tone: "ok" | "warn" | "error" } | null>(null);
+
+  // ---- Dues Cleared (super admin only) ---------------------------------
+  const [clearingId, setClearingId] = useState<string | null>(null);
+  const [clearResult, setClearResult] = useState<{ id: string; text: string; tone: "ok" | "error" } | null>(null);
+
+  async function markDuesCleared(student: Student) {
+    const reason = prompt(`Mark ${student.fullName} as Dues Cleared? Enter the reason (admin-only, never shown to the student):`);
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      setClearResult({ id: student.id, text: "A reason is required", tone: "error" });
+      return;
+    }
+    setClearingId(student.id);
+    setClearResult(null);
+    try {
+      const res = await fetch(`/api/students/${student.id}/exempt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setClearResult({ id: student.id, text: data.error ?? "Could not mark as Dues Cleared", tone: "error" });
+        return;
+      }
+      const emailText =
+        data.email?.status === "SENT"
+          ? "clearance email sent"
+          : `email not sent${data.email?.reason ? ` (${data.email.reason})` : ""} - you can still download the PDF`;
+      setClearResult({ id: student.id, text: `Cleared - receipt ${data.receiptNumber}, ${emailText}`, tone: "ok" });
+      fetchStudents();
+    } finally {
+      setClearingId(null);
+    }
+  }
+
+  async function removeClearance(student: Student) {
+    if (!confirm(`Remove ${student.fullName}'s clearance? Their clearance receipt will stop being valid and they will have to pay.`)) return;
+    setClearingId(student.id);
+    setClearResult(null);
+    try {
+      const res = await fetch(`/api/students/${student.id}/exempt`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setClearResult({ id: student.id, text: data.error ?? "Could not remove the clearance", tone: "error" });
+        return;
+      }
+      fetchStudents();
+    } finally {
+      setClearingId(null);
+    }
+  }
+
+  function downloadClearanceReceipt(student: Student) {
+    window.open(`/api/students/${student.id}/clearance-receipt`, "_blank");
+  }
+
+  async function resendStudentReceipt(student: Student) {
+    if (
+      !confirm(
+        `Resend ${student.fullName}'s receipt? This sends to whatever phone/email is currently on file for them - double-check it's correct first if you're fixing a typo.`
+      )
+    ) {
+      return;
+    }
+    setResendingId(student.id);
+    setResendResult(null);
+    try {
+      const res = await fetch(`/api/students/${student.id}/resend-receipt`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResendResult({ id: student.id, text: data.error ?? "Could not resend the receipt" });
+        return;
+      }
+      const parts: string[] = [];
+      if (data.sms !== "SKIPPED") parts.push(`SMS ${data.sms.toLowerCase()}`);
+      if (data.email !== "SKIPPED") parts.push(`Email ${data.email.toLowerCase()}`);
+      setResendResult({
+        id: student.id,
+        text: parts.length ? parts.join(", ") : data.emailReason ?? "Nothing to resend (SMS/email disabled or no email on file)",
+      });
+    } finally {
+      setResendingId(null);
+    }
+  }
+
+  // Asks the payment provider what actually happened to this student's
+  // pending payment - the check to run BEFORE cancelling one. If the provider
+  // says it went through, the payment is confirmed and the receipt issued,
+  // just as if the webhook had arrived.
+  async function checkPayment(student: Student) {
+    setCheckingId(student.id);
+    setCheckResult(null);
+    try {
+      const res = await fetch(`/api/students/${student.id}/verify-payment`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCheckResult({ id: student.id, text: data.error ?? "Could not check the payment", tone: "error" });
+        return;
+      }
+      switch (data.outcome) {
+        case "CONFIRMED":
+          setCheckResult({ id: student.id, text: `Payment confirmed - receipt ${data.receiptNumber} issued`, tone: "ok" });
+          break;
+        case "ALREADY_CONFIRMED":
+          setCheckResult({ id: student.id, text: "Already confirmed", tone: "ok" });
+          break;
+        case "STILL_PENDING":
+          setCheckResult({
+            id: student.id,
+            text: "The provider says this payment isn't finished yet. Check again in a few minutes.",
+            tone: "warn",
+          });
+          break;
+        case "FAILED":
+          setCheckResult({ id: student.id, text: "The provider reports this payment failed. It's safe to cancel it.", tone: "warn" });
+          break;
+        case "SKIPPED":
+          setCheckResult({ id: student.id, text: data.reason ?? "Can't be checked automatically", tone: "warn" });
+          break;
+        default:
+          setCheckResult({ id: student.id, text: data.message ?? "Could not reach the payment provider", tone: "error" });
+      }
+      fetchStudents();
+    } finally {
+      setCheckingId(null);
+    }
+  }
+
+  async function cancelPendingPayment(student: Student) {
+    if (
+      !confirm(
+        `Cancel ${student.fullName}'s in-progress payment? Only do this if you've confirmed it didn't actually go through - this lets them start a fresh payment immediately instead of waiting.`
+      )
+    ) {
+      return;
+    }
+    setCancellingId(student.id);
+    setCancelError(null);
+    try {
+      const res = await fetch(`/api/students/${student.id}/cancel-pending-payment`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCancelError({ id: student.id, text: data.error ?? "Could not cancel the pending payment" });
+        return;
+      }
+      fetchStudents();
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  async function submitAdd(e: React.FormEvent) {
+    e.preventDefault();
+    setAddError(null);
+    const res = await fetch("/api/students", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...addForm, departmentId, academicSessionId }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setAddError(data.error ?? "Could not add student");
+      return;
+    }
+    setAddForm(emptyForm);
+    setShowAddDialog(false);
+    fetchStudents();
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          placeholder="Search name, reference, or index no."
+          className="admin-input max-w-xs"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className="admin-input max-w-[140px]" value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)}>
+          <option value="">All Levels</option>
+          {["L100", "L200", "L300", "L400"].map((l) => (
+            <option key={l} value={l}>{l.replace("L", "Level ")}</option>
+          ))}
+        </select>
+        <select className="admin-input max-w-[160px]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">All Payment Status</option>
+          <option value="SUCCESS">Paid</option>
+          <option value="PENDING">Unpaid / Pending</option>
+        </select>
+        <select className="admin-input max-w-[170px]" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+          <option value="">All Sources</option>
+          <option value="SELF">Self-registered</option>
+          <option value="ADMIN">Added by admin</option>
+        </select>
+        <select className="admin-input max-w-[150px]" value={exemptFilter} onChange={(e) => setExemptFilter(e.target.value)}>
+          <option value="">All Students</option>
+          <option value="true">Exempt only</option>
+          <option value="false">Not exempt</option>
+        </select>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md transition-colors hover:bg-white/10 hover:text-admin-text disabled:opacity-60"
+            onClick={() => fetchStudents()}
+            disabled={loading}
+            aria-label="Refresh students"
+            type="button"
+          >
+            {loading ? <Spinner /> : <RefreshCw size={16} />}
+          </button>
+          <button className="admin-btn-secondary" onClick={() => setShowCsvDialog(true)}>Upload CSV</button>
+          <button className="admin-btn-primary" onClick={() => setShowAddDialog(true)}>Add Student</button>
+          {departmentId && (
+            <button
+              className="admin-btn-secondary text-red-400 disabled:opacity-60"
+              onClick={deleteAllStudents}
+              disabled={bulkDeleting || students.length === 0}
+            >
+              {bulkDeleting ? "Deleting..." : "Delete All"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {bulkResult && <p className="rounded-md bg-white/5 px-3 py-2 text-sm text-muted">{bulkResult}</p>}
+
+      <div className="admin-card overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-muted">
+            <tr className="border-b border-border">
+              <th className="p-3">Name</th>
+              <th className="p-3">Reference</th>
+              <th className="p-3">Level</th>
+              <th className="p-3">Phone</th>
+              <th className="p-3">Status</th>
+              <th className="p-3">Source</th>
+              <th className="p-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr><td colSpan={7} className="p-4 text-center text-muted">Loading...</td></tr>
+            )}
+            {!loading && fetchError && (
+              <tr><td colSpan={7} className="p-4 text-center text-red-400">Error: {fetchError}</td></tr>
+            )}
+            {!loading && !fetchError && students.length === 0 && (
+              <tr><td colSpan={7} className="p-4 text-center text-muted">No students found.</td></tr>
+            )}
+            {students.map((s) => (
+              <tr key={s.id} className="border-b border-border/50">
+                <td className="p-3">{s.fullName}</td>
+                <td className="p-3">{s.referenceNumber}</td>
+                <td className="p-3">{s.level.replace("L", "")}</td>
+                <td className="p-3">{s.phone}</td>
+                <td className="p-3">
+                  {s.isExempt && (
+                    <>
+                      <span className="rounded-full bg-sky-400/10 px-2 py-0.5 text-xs font-medium text-sky-400">Exempt</span>
+                      {s.exemptReason && (
+                        <p className="mt-1 max-w-[220px] truncate text-xs text-sky-400/70" title={s.exemptReason}>
+                          {s.exemptReason}
+                        </p>
+                      )}
+                    </>
+                  )}
+                  {clearResult?.id === s.id && (
+                    <p className={`mt-1 text-xs ${clearResult.tone === "ok" ? "text-accent" : "text-red-400"}`}>{clearResult.text}</p>
+                  )}
+                  <span
+                    className={s.isExempt ? "hidden" : 
+                      s.paymentStatus === "SUCCESS"
+                        ? "text-accent"
+                        : s.hasPendingPayment
+                          ? "text-amber-400"
+                          : s.lastFailedPayment
+                            ? "text-red-400"
+                            : "text-muted"
+                    }
+                  >
+                    {s.paymentStatus === "SUCCESS"
+                      ? "PAID"
+                      : s.hasPendingPayment
+                        ? "PENDING"
+                        : s.lastFailedPayment
+                          ? "FAILED"
+                          : "UNPAID"}
+                  </span>
+                  {s.lastFailedPayment && !s.hasPendingPayment && s.paymentStatus !== "SUCCESS" && (
+                    <p
+                      className="mt-1 max-w-[220px] truncate text-xs text-red-400/70"
+                      title={s.lastFailedPayment.reason ?? undefined}
+                    >
+                      {s.lastFailedPayment.reason ?? "No reason recorded"}
+                    </p>
+                  )}
+                  {cancelError?.id === s.id && (
+                    <p className="mt-1 text-xs text-red-400">{cancelError.text}</p>
+                  )}
+                  {resendResult?.id === s.id && (
+                    <p className="mt-1 text-xs text-muted">{resendResult.text}</p>
+                  )}
+                  {checkResult?.id === s.id && (
+                    <p
+                      className={`mt-1 text-xs ${
+                        checkResult.tone === "ok" ? "text-accent" : checkResult.tone === "warn" ? "text-amber-400" : "text-red-400"
+                      }`}
+                    >
+                      {checkResult.text}
+                    </p>
+                  )}
+                </td>
+                <td className="p-3">
+                  {s.registrationSource === "SELF" ? (
+                    <span
+                      className="rounded-full bg-amber-400/10 px-2 py-0.5 text-xs font-medium text-amber-400"
+                      title="Registered directly by the student on the public payment form - not vetted by an admin"
+                    >
+                      Self-registered
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted">Admin</span>
+                  )}
+                </td>
+                <td className="space-x-2 p-3 text-right">
+                  {s.paymentStatus !== "SUCCESS" && s.hasPendingPayment && (
+                    <button
+                      className="text-accent hover:underline disabled:opacity-50"
+                      onClick={() => checkPayment(s)}
+                      disabled={checkingId === s.id}
+                    >
+                      {checkingId === s.id ? "Checking..." : "Check Payment"}
+                    </button>
+                  )}
+                  {s.paymentStatus !== "SUCCESS" && s.hasPendingPayment && (
+                    <button
+                      className="text-amber-400 hover:underline disabled:opacity-50"
+                      onClick={() => cancelPendingPayment(s)}
+                      disabled={cancellingId === s.id}
+                    >
+                      {cancellingId === s.id ? "Cancelling..." : "Cancel Pending Payment"}
+                    </button>
+                  )}
+                  {isSuperAdmin && !s.isExempt && s.level !== "L100" && s.paymentStatus !== "SUCCESS" && !s.hasPendingPayment && (
+                    <button
+                      className="text-sky-400 hover:underline disabled:opacity-50"
+                      onClick={() => markDuesCleared(s)}
+                      disabled={clearingId === s.id}
+                    >
+                      {clearingId === s.id ? "Working..." : "Mark Dues Cleared"}
+                    </button>
+                  )}
+                  {isSuperAdmin && s.isExempt && (
+                    <>
+                      <button className="text-accent hover:underline" onClick={() => downloadClearanceReceipt(s)}>
+                        Download Clearance Receipt
+                      </button>
+                      <button
+                        className="text-accent hover:underline disabled:opacity-50"
+                        onClick={() => resendStudentReceipt(s)}
+                        disabled={resendingId === s.id}
+                      >
+                        {resendingId === s.id ? "Sending..." : "Send Clearance Receipt"}
+                      </button>
+                      <button
+                        className="text-amber-400 hover:underline disabled:opacity-50"
+                        onClick={() => removeClearance(s)}
+                        disabled={clearingId === s.id}
+                      >
+                        Remove Clearance
+                      </button>
+                    </>
+                  )}
+                  {s.paymentStatus === "SUCCESS" && (
+                    <button
+                      className="text-accent hover:underline disabled:opacity-50"
+                      onClick={() => resendStudentReceipt(s)}
+                      disabled={resendingId === s.id}
+                    >
+                      {resendingId === s.id ? "Resending..." : "Resend Receipt"}
+                    </button>
+                  )}
+                  <button className="text-accent hover:underline" onClick={() => openEditDialog(s)}>Edit</button>
+                  <button className="text-red-400 hover:underline" onClick={() => deleteStudent(s.id)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add Student Dialog */}
+      {showAddDialog && (
+        <Modal title="Add Student" onClose={() => setShowAddDialog(false)}>
+          <form onSubmit={submitAdd} className="space-y-3">
+            {addError && <p className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-400">{addError}</p>}
+            <StudentFields form={addForm} setForm={setAddForm} />
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" className="admin-btn-secondary" onClick={() => setShowAddDialog(false)}>Cancel</button>
+              <button type="submit" className="admin-btn-primary">Add Student</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Edit Student Dialog - Cancel performs NO mutation, only Save Changes does */}
+      {editingStudentId && (
+        <Modal title="Edit Student" onClose={closeEditDialog}>
+          <div className="space-y-3">
+            {editError && <p className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-400">{editError}</p>}
+            <StudentFields form={editForm} setForm={setEditForm} />
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" className="admin-btn-secondary" onClick={closeEditDialog} disabled={saving}>
+                Cancel
+              </button>
+              <button type="button" className="admin-btn-primary flex items-center justify-center gap-2" onClick={saveEdit} disabled={saving}>
+                {saving && <Spinner />}
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showCsvDialog && (
+        <CsvUploadDialog
+          departmentId={departmentId}
+          academicSessionId={academicSessionId}
+          onClose={() => setShowCsvDialog(false)}
+          onDone={() => {
+            setShowCsvDialog(false);
+            fetchStudents();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function StudentFields({
+  form,
+  setForm,
+}: {
+  form: typeof emptyForm;
+  setForm: (f: typeof emptyForm) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field label="Full Name" value={form.fullName} onChange={(v) => setForm({ ...form, fullName: v })} full />
+      <Field label="Reference Number" value={form.referenceNumber} onChange={(v) => setForm({ ...form, referenceNumber: v })} />
+      <Field label="Student Index No." value={form.studentIndexNo} onChange={(v) => setForm({ ...form, studentIndexNo: v })} />
+      <div className="space-y-1">
+        <label className="text-sm text-muted">Level</label>
+        <select className="admin-input" value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })}>
+          {["L100", "L200", "L300", "L400"].map((l) => (
+            <option key={l} value={l}>{l.replace("L", "Level ")}</option>
+          ))}
+        </select>
+      </div>
+      <Field label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
+      <Field label="Email (optional)" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, full }: { label: string; value: string; onChange: (v: string) => void; full?: boolean }) {
+  return (
+    <div className={`space-y-1 ${full ? "col-span-2" : ""}`}>
+      <label className="text-sm text-muted">{label}</label>
+      <input className="admin-input" value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="admin-card w-full max-w-lg p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button onClick={onClose} className="text-muted hover:text-foreground">✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CsvUploadDialog({
+  departmentId,
+  academicSessionId,
+  onClose,
+  onDone,
+}: {
+  departmentId?: string;
+  academicSessionId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [csvText, setCsvText] = useState<string | null>(null);
+  const [preview, setPreview] = useState<any>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function downloadCsvTemplate() {
+    const header = "name,reference_number,student_id,level,phone,email";
+    const sampleRow = "Kwame Mensah,9013200723,10987654,300,0551234567,kwame.mensah@example.com";
+    const csv = `${header}\n${sampleRow}\n`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "student_upload_template.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setCsvText(text);
+    const res = await fetch("/api/students/csv-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csvText: text, departmentId, academicSessionId, dryRun: true }),
+    });
+    const data = await res.json();
+    setPreview(data);
+  }
+
+  async function confirmInsert() {
+    if (!csvText) return;
+    setSubmitting(true);
+    await fetch("/api/students/csv-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csvText, departmentId, academicSessionId, dryRun: false }),
+    });
+    setSubmitting(false);
+    onDone();
+  }
+
+  return (
+    <Modal title="Upload Students CSV" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-sm text-muted">
+          Columns required: name, reference_number, student_id, level, phone, email
+        </p>
+        <button type="button" className="admin-btn-secondary" onClick={downloadCsvTemplate}>
+          Download CSV Template
+        </button>
+        <input type="file" accept=".csv" onChange={handleFile} className="admin-input" />
+
+        {preview && (
+          <div className="space-y-2 text-sm">
+            <p>
+              {preview.validCount} valid / {preview.errorCount} errors out of {preview.totalRows} rows
+            </p>
+            {preview.errors?.length > 0 && (
+              <div className="max-h-32 overflow-y-auto rounded-md bg-red-950/50 p-2 text-red-300">
+                {preview.errors.slice(0, 20).map((e: any, i: number) => (
+                  <div key={i}>Row {e.row}: {e.message}</div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button className="admin-btn-secondary" onClick={onClose}>Cancel</button>
+              <button className="admin-btn-primary flex items-center justify-center gap-2" disabled={submitting || preview.validCount === 0} onClick={confirmInsert}>
+                {submitting && <Spinner />}
+                {submitting ? "Inserting..." : `Insert ${preview.validCount} Students`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
