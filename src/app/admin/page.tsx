@@ -6,6 +6,7 @@ import { SmsSettingsForm } from "@/components/admin/sms-settings-form";
 import { EmailSettingsForm } from "@/components/admin/email-settings-form";
 import { DeliveryFailures } from "@/components/admin/delivery-failures";
 import { ReceiptSettingsForm } from "@/components/admin/receipt-settings-form";
+import { PaymentMessages } from "@/components/admin/payment-messages";
 
 type Payment = {
   id: string;
@@ -18,6 +19,8 @@ type Payment = {
   student: { fullName: string; referenceNumber: string; phone: string; email: string | null };
   failureReason?: string | null;
   receipt: { receiptNumber: string } | null;
+  lastSms: { status: "PENDING" | "SENT" | "FAILED"; createdAt: string; errorMessage: string | null } | null;
+  lastEmail: { status: "PENDING" | "SENT" | "FAILED"; createdAt: string; errorMessage: string | null } | null;
 };
 
 // After "Settings saved securely." shows, return to the payment records by itself.
@@ -35,11 +38,22 @@ export default function AdminDashboard() {
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notice, setNotice] = useState("");
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef("");
+  const requestId = useRef(0);
 
-  const loadPayments = useCallback(
-    () => fetch("/api/admin/payments").then((r) => r.json()).then((d) => (d.error ? setError(d.error) : (setError(""), setData(d)))).catch(() => setError("Unable to load payment records")),
-    [],
-  );
+  // Always loads for whatever is typed in the search box. If several loads overlap, only the newest one is shown.
+  const loadPayments = useCallback(async () => {
+    const id = ++requestId.current;
+    const q = searchRef.current.trim();
+    try {
+      const d = await fetch(`/api/admin/payments${q ? `?q=${encodeURIComponent(q)}` : ""}`).then((r) => r.json());
+      if (id !== requestId.current) return;
+      if (d.error) setError(d.error); else { setError(""); setData(d); }
+    } catch {
+      if (id === requestId.current) setError("Unable to load payment records");
+    }
+  }, []);
 
   // Cancel a failed / stuck payment so the student can start again (Admin and Super Admin).
   async function cancelPayment(p: Payment) {
@@ -56,13 +70,19 @@ export default function AdminDashboard() {
     }
   }
 
+  // Search as the admin types (waits a moment after the last key press).
   useEffect(() => {
-    loadPayments();
+    searchRef.current = search;
+    const t = setTimeout(loadPayments, search.trim() ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [search, loadPayments]);
+
+  useEffect(() => {
     fetch("/api/admin/settings").then((r) => r.json()).then((d) => {
       if (d.config) setConfig((c: any) => ({ ...c, ...d.config, secretKey: "", webhookSecret: "" }));
     }).catch(() => {});
     return () => { if (closeTimer.current) clearTimeout(closeTimer.current); };
-  }, [loadPayments]);
+  }, []);
 
   async function save(e: any) {
     e.preventDefault();
@@ -140,10 +160,19 @@ export default function AdminDashboard() {
             ))}
           </section>
 
+          <section className="portal-card-glass p-4">
+            <label className="block text-sm text-portal-muted" htmlFor="payment-search">Find a student</label>
+            <div className="mt-1 flex gap-2">
+              <input id="payment-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, reference number or receipt number" className="portal-input flex-1" autoComplete="off" />
+              {search && <button type="button" onClick={() => setSearch("")} className="portal-btn-ghost">Clear</button>}
+            </div>
+            {search.trim() && data && <p className="mt-2 text-xs text-portal-muted">{data.payments?.length ?? 0} payment{data.payments?.length === 1 ? "" : "s"} found for “{search.trim()}”</p>}
+          </section>
+
           <section className="portal-card-glass overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm text-portal-text">
+            <table className="w-full min-w-[1100px] text-left text-sm text-portal-text">
               <thead className="border-b border-black/10 text-portal-muted">
-                <tr>{["Student", "Reference", "Phone", "Items", "Amount", "Status", "Date", "Receipt"].map((h) => <th key={h} className="p-3 font-semibold">{h}</th>)}</tr>
+                <tr>{["Student", "Reference", "Phone", "Items", "Amount", "Status", "Date", "Receipt", "SMS & email"].map((h) => <th key={h} className="p-3 font-semibold">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {(data?.payments || []).map((p: Payment) => (
@@ -162,11 +191,12 @@ export default function AdminDashboard() {
                     </td>
                     <td className="p-3">{new Date(p.createdAt).toLocaleString()}</td>
                     <td className="p-3">{p.receipt ? <a href={`/api/receipts/download?ref=${encodeURIComponent(p.internalReference)}`} className="font-semibold text-portal-accentDark underline">{p.receipt.receiptNumber} (PDF)</a> : "—"}</td>
+                    <td className="min-w-[220px] p-3 align-top"><PaymentMessages paymentId={p.id} canResend={p.status === "SUCCESS" && !!p.receipt} lastSms={p.lastSms} lastEmail={p.lastEmail} onDone={loadPayments} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!data?.payments?.length && <p className="p-8 text-center text-portal-muted">No payments recorded yet.</p>}
+            {!data?.payments?.length && <p className="p-8 text-center text-portal-muted">{search.trim() ? "No student or receipt matches that search." : "No payments recorded yet."}</p>}
           </section>
         </>
       ) : tab === "sms" ? (
