@@ -83,7 +83,7 @@ export class PaystackProvider implements PaymentProvider {
     );
 
     if (!res.ok) {
-      throw new Error(`Paystack verification failed with status ${res.status}`);
+      throw Object.assign(new Error(`Paystack verification failed with status ${res.status}`), { status: res.status });
     }
 
     const data = await res.json();

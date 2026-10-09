@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { SmsSettingsForm } from "@/components/admin/sms-settings-form";
@@ -14,6 +14,7 @@ type Payment = {
   createdAt: string;
   paidAt: string | null;
   student: { fullName: string; referenceNumber: string; phone: string; email: string | null };
+  failureReason?: string | null;
   receipt: { receiptNumber: string } | null;
 };
 
@@ -30,14 +31,36 @@ export default function AdminDashboard() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [notice, setNotice] = useState("");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  const loadPayments = useCallback(
+    () => fetch("/api/admin/payments").then((r) => r.json()).then((d) => (d.error ? setError(d.error) : (setError(""), setData(d)))).catch(() => setError("Unable to load payment records")),
+    [],
+  );
+
+  // Cancel a failed / stuck payment so the student can start again (Admin and Super Admin).
+  async function cancelPayment(p: Payment) {
+    if (!window.confirm(`Cancel this ${p.status.toLowerCase()} payment for ${p.student.fullName}? They will be able to start a new payment.`)) return;
+    setCancellingId(p.id);
+    setNotice("");
+    try {
+      const r = await fetch(`/api/admin/payments/${p.id}/cancel`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      setNotice(r.ok ? `Cancelled. ${p.student.fullName} can now pay again.` : d.error || "Could not cancel this payment");
+      await loadPayments();
+    } finally {
+      setCancellingId(null);
+    }
+  }
 
   useEffect(() => {
-    fetch("/api/admin/payments").then((r) => r.json()).then((d) => (d.error ? setError(d.error) : setData(d))).catch(() => setError("Unable to load payment records"));
+    loadPayments();
     fetch("/api/admin/settings").then((r) => r.json()).then((d) => {
       if (d.config) setConfig((c: any) => ({ ...c, ...d.config, secretKey: "", webhookSecret: "" }));
     }).catch(() => {});
     return () => { if (closeTimer.current) clearTimeout(closeTimer.current); };
-  }, []);
+  }, [loadPayments]);
 
   async function save(e: any) {
     e.preventDefault();
@@ -57,7 +80,7 @@ export default function AdminDashboard() {
 
   const stats = data?.stats;
   const tabClass = (active: boolean) => (active ? "portal-btn-primary" : "portal-btn-ghost");
-  const statusClass = (s: string) => (s === "SUCCESS" ? "text-emerald-700" : s === "FAILED" ? "text-red-600" : "text-amber-600");
+  const statusClass = (s: string) => (s === "SUCCESS" ? "text-emerald-700" : s === "FAILED" ? "text-red-600" : s === "CANCELLED" ? "text-slate-500" : "text-amber-600");
 
   return (
     <AdminShell
@@ -80,6 +103,7 @@ export default function AdminDashboard() {
 
       {tab === "payments" ? (
         <>
+          {notice && <p role="status" className={`rounded-md border px-3 py-2 text-sm ${notice.startsWith("Cancelled") ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{notice}</p>}
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[
@@ -101,6 +125,7 @@ export default function AdminDashboard() {
               ["Successful", Number(stats?.successful || 0), "bg-emerald-500"],
               ["Pending", Number(stats?.pending || 0), "bg-amber-500"],
               ["Failed", Number(stats?.failed || 0), "bg-rose-500"],
+              ["Cancelled", Number(stats?.cancelled || 0), "bg-slate-400"],
             ] as [string, number, string][]).map(([label, value, color]) => (
               <div key={label} className="mb-3 last:mb-0">
                 <div className="mb-1 flex justify-between text-sm text-portal-text"><span>{label}</span><span>{value}</span></div>
@@ -124,7 +149,13 @@ export default function AdminDashboard() {
                     <td className="p-3">{p.student.phone}</td>
                     <td className="p-3">{Array.isArray((p as any).items) ? (p as any).items.map((i: any) => i.label).join(", ") : "—"}</td>
                     <td className="p-3">{p.currency} {Number(p.amount).toFixed(2)}</td>
-                    <td className="p-3"><span className={`font-semibold ${statusClass(p.status)}`}>{p.status}</span></td>
+                    <td className="max-w-[240px] p-3 align-top">
+                      <span className={`font-semibold ${statusClass(p.status)}`}>{p.status}</span>
+                      {(p.status === "FAILED" || p.status === "CANCELLED") && <div className="mt-1 break-words text-xs text-portal-muted"><span className="font-semibold">Reason:</span> {p.failureReason || "No reason recorded"}</div>}
+                      {(p.status === "FAILED" || p.status === "PENDING") && (
+                        <button type="button" disabled={cancellingId === p.id} onClick={() => cancelPayment(p)} title="Cancel this payment so the student can start a new one" className="portal-btn-ghost mt-2 !px-3 !py-1 text-xs">{cancellingId === p.id ? "Cancelling…" : "Cancel & allow retry"}</button>
+                      )}
+                    </td>
                     <td className="p-3">{new Date(p.createdAt).toLocaleString()}</td>
                     <td className="p-3">{p.receipt ? <a href={`/api/receipts/download?ref=${encodeURIComponent(p.internalReference)}`} className="font-semibold text-portal-accentDark underline">{p.receipt.receiptNumber} (PDF)</a> : "—"}</td>
                   </tr>
