@@ -1,8 +1,8 @@
-import type { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getPaymentProvider } from "@/lib/payments/provider-factory";
 import { decryptPaymentSecrets } from "@/lib/crypto/field-encryption";
+import { confirmSuccessfulPayment } from "@/lib/payments/confirm-payment";
 export async function POST(req: NextRequest) {
   const rawBody = await req.text(); let payload: any;
   try { payload = JSON.parse(rawBody); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
@@ -19,10 +19,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) { await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } }); await prisma.webhookEvent.updateMany({ where: { provider: "PAYSTACK", providerEventId: parsed.providerEventId }, data: { processed: true } }); return NextResponse.json({ received: true }); }
   const verified = await provider.verifyTransaction({ providerTxId: parsed.providerTxId, internalReference: parsed.internalReference }, { publicKey: config.publicKey, secretKey: config.secretKey, webhookSecret: config.webhookSecret, environment: config.environment });
   if (!verified.success || verified.internalReference !== payment.internalReference || verified.amount !== Number(payment.amount) || verified.currency !== payment.currency) return NextResponse.json({ error: "Payment verification mismatch" }, { status: 400 });
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.payment.update({ where: { id: payment.id }, data: { status: "SUCCESS", providerTxId: verified.providerTxId, paidAt: verified.paidAt || new Date() } });
-    await tx.receipt.upsert({ where: { paymentId: payment.id }, update: {}, create: { paymentId: payment.id, studentId: payment.studentId, receiptNumber: `REC-${new Date().getFullYear()}-${payment.internalReference}` } });
-    await tx.webhookEvent.updateMany({ where: { provider: "PAYSTACK", providerEventId: parsed.providerEventId }, data: { processed: true } });
-  });
+  await confirmSuccessfulPayment(payment.id, { providerTxId: verified.providerTxId, paidAt: verified.paidAt });
+  await prisma.webhookEvent.updateMany({ where: { provider: "PAYSTACK", providerEventId: parsed.providerEventId }, data: { processed: true } });
   return NextResponse.json({ received: true });
 }

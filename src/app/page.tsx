@@ -28,7 +28,7 @@ export default function Home() {
           <div>
             <p className="portal-heading-on-photo text-sm font-bold uppercase tracking-widest sm:text-base">University Of Mines And Technology</p>
             <p className="portal-heading-on-photo text-sm font-bold uppercase tracking-widest sm:text-base">Essikado Campus</p>
-            <p className="mt-1 text-base font-semibold text-black sm:text-lg">Student Payment Portal</p>
+            <p className="mt-1 text-base font-semibold text-black sm:text-lg">Student Representative Council</p>
           </div>
         </div>
 
@@ -68,7 +68,6 @@ export default function Home() {
           </div>
         </section>
 
-        <footer className="text-xs"><a href="/admin/login" className="portal-text-on-photo hover:underline">Administrator sign in</a></footer>
       </div>
     </main>
   );

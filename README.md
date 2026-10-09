@@ -9,6 +9,9 @@ A single-system payment portal. Students visit the root URL (`/`) to choose purc
 - `/admin/login` — the single administrator sign-in page
 - `/admin` — payment dashboard; Super Admin accounts also see system-wide provider settings
 - `/api/payments/initiate` — validates checkout selections server-side and initializes a provider transaction
+- `/api/payments/status` — payment-status polling; `/api/receipts/download?ref=…` — PDF receipt for a confirmed payment
+- `/api/admin/receipt-settings` — Super Admin-only President/Treasurer names and signature images printed on PDF receipts
+- `/api/admin/sms-settings` — Super Admin-only SMS provider, API key, sender ID and message template
 - `/api/webhooks/paystack` — verifies Paystack signatures and independently verifies successful transactions before issuing a receipt
 - `/api/admin/payments` — authenticated payment records and dashboard totals
 - `/api/admin/settings` — Super Admin-only global payment-provider configuration
@@ -30,7 +33,7 @@ The login credentials determine the user's role (`SUPER_ADMIN` or `ADMIN`). Admi
 4. Generate Prisma Client: `npx prisma generate`.
 5. Seed the initial administrator and singleton payment configuration: `npm run prisma:seed`.
 6. Start locally: `npm run dev`; for production: `npm run build` then `npm start`.
-7. Sign in at `/admin/login`. A Super Admin can set provider keys under Payment settings.
+7. Sign in at `/admin/login` (no link on the public page - go to the URL directly). A Super Admin sets the Paystack keys under Payment settings and the SMS provider, API key and sender ID under SMS settings. The President/Treasurer signatories for receipts and the portal QR code are under Receipts & QR (Super Admin only).
 
 Never commit `.env` or real payment-provider secrets. Provider secret and webhook keys are encrypted at rest using `ENCRYPTION_KEY`; do not change that key after saving credentials unless you first decrypt/re-encrypt the stored secrets.
 

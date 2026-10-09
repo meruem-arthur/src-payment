@@ -1,10 +1,16 @@
+// Checkout catalogue - item names follow the SRC "Breakdown of the Personal
+// Protective Equipment (PPEs) and Drawing Board with Engineering Set" sheet
+// (ref SRC/OT/001). This is the ONLY place prices are defined: the checkout
+// page, the payment API, receipts and SMS all read from here.
+//
+// `short` is the compact name used where space is tight (SMS).
 export const PRODUCTS = {
-  DRAWING_BOARD: { label: "Drawing Board", amount: 390 },
-  SAFETY_BOOT: { label: "Safety Boot", amount: 300 },
-  HELMET: { label: "Safety Helmet", amount: 60 },
-  GOGGLES: { label: "Safety Goggles", amount: 45 },
-  EARPLUGS: { label: "Earplugs", amount: 15 },
-  VEST: { label: "Safety Vest", amount: 50 },
+  DRAWING_BOARD: { label: "Standard A3 Drawing Board + Set Square + Engineering Set + A3 Drawing Sheet", short: "A3 Drawing Board Set", amount: 390 },
+  SAFETY_BOOT: { label: "Hard Steel-Toed Safety Boots", short: "Safety Boots", amount: 300 },
+  HELMET: { label: "Safety Helmet", short: "Safety Helmet", amount: 60 },
+  VEST: { label: "Reflector Vest", short: "Reflector Vest", amount: 50 },
+  GOGGLES: { label: "Safety Goggles", short: "Safety Goggles", amount: 45 },
+  EARPLUGS: { label: "Earplugs", short: "Earplugs", amount: 15 },
 } as const;
 export type ProductId = keyof typeof PRODUCTS;
 export function validateProductSelection(items: unknown): ProductId[] | null {

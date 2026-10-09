@@ -29,6 +29,11 @@ enum PaymentStatus {
   CANCELLED
   REFUNDED
 }
+enum SmsProviderType {
+  MOCK
+  ARKESEL
+  AFRICASTALKING
+}
 enum NotificationChannel {
   SMS
   EMAIL
@@ -125,6 +130,29 @@ model PaymentProviderConfiguration {
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   @@map("payment_provider_configurations")
+}
+
+model SmsConfiguration {
+  id              String          @id @default("singleton")
+  provider        SmsProviderType @default(MOCK)
+  senderId        String          @default("")
+  messageTemplate String          @default("UMaT SRC: Payment of GHS {amount} confirmed for {name} ({reference}).\nItems: {items}\nReceipt No: {receipt}")
+  apiKey          String?
+  username        String?
+  enabled         Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  @@map("sms_configurations")
+}
+
+model ReceiptSettings {
+  id                 String   @id @default("singleton")
+  presidentName      String?
+  presidentSignature String?  @db.Text
+  treasurerName      String?
+  treasurerSignature String?  @db.Text
+  updatedAt          DateTime @updatedAt
+  @@map("receipt_settings")
 }
 
 model SupportSettings {

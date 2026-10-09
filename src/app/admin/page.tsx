@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { AdminShell } from "@/components/admin/admin-shell";
+import { SmsSettingsForm } from "@/components/admin/sms-settings-form";
+import { ReceiptSettingsForm } from "@/components/admin/receipt-settings-form";
 
 type Payment = {
   id: string;
@@ -23,7 +25,7 @@ export default function AdminDashboard() {
   const isSuper = (session?.user as any)?.role === "SUPER_ADMIN";
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"payments" | "settings">("payments");
+  const [tab, setTab] = useState<"payments" | "settings" | "sms" | "receipts">("payments");
   const [config, setConfig] = useState<any>({ provider: "PAYSTACK", environment: "TEST", publicKey: "", secretKey: "", webhookSecret: "", configValue: "" });
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -72,6 +74,8 @@ export default function AdminDashboard() {
       <nav className="flex gap-3">
         <button onClick={() => setTab("payments")} className={tabClass(tab === "payments")}>Payment records</button>
         {isSuper && <button onClick={() => setTab("settings")} className={tabClass(tab === "settings")}>Payment settings</button>}
+        {isSuper && <button onClick={() => setTab("sms")} className={tabClass(tab === "sms")}>SMS settings</button>}
+        {isSuper && <button onClick={() => setTab("receipts")} className={tabClass(tab === "receipts")}>Receipts &amp; QR</button>}
       </nav>
 
       {tab === "payments" ? (
@@ -122,7 +126,7 @@ export default function AdminDashboard() {
                     <td className="p-3">{p.currency} {Number(p.amount).toFixed(2)}</td>
                     <td className="p-3"><span className={`font-semibold ${statusClass(p.status)}`}>{p.status}</span></td>
                     <td className="p-3">{new Date(p.createdAt).toLocaleString()}</td>
-                    <td className="p-3">{p.receipt?.receiptNumber || "—"}</td>
+                    <td className="p-3">{p.receipt ? <a href={`/api/receipts/download?ref=${encodeURIComponent(p.internalReference)}`} className="font-semibold text-portal-accentDark underline">{p.receipt.receiptNumber} (PDF)</a> : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -130,6 +134,10 @@ export default function AdminDashboard() {
             {!data?.payments?.length && <p className="p-8 text-center text-portal-muted">No payments recorded yet.</p>}
           </section>
         </>
+      ) : tab === "sms" ? (
+        <SmsSettingsForm />
+      ) : tab === "receipts" ? (
+        <ReceiptSettingsForm />
       ) : (
         <section className="portal-card-glass max-w-2xl p-6">
           <h2 className="mb-5 text-xl font-semibold text-portal-text">System-wide payment provider</h2>

@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getPaymentProvider } from "@/lib/payments/provider-factory";
@@ -28,4 +29,4 @@ export async function POST(req: NextRequest) {
     } catch (err) { await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED", failureReason: err instanceof Error ? err.message.slice(0, 500) : "Payment initialization failed" } }); throw err; }
   } catch (error) { console.error("Payment initiation failed", error); return NextResponse.json({ error: "Could not initiate payment. Please try again." }, { status: 500 }); }
 }
-function cryptoRandom() { return Math.random().toString(36).slice(2, 9).toUpperCase(); }
+function cryptoRandom() { return randomBytes(9).toString("hex").toUpperCase(); }
