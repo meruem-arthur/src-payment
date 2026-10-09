@@ -12,6 +12,8 @@ A single-system payment portal. Students visit the root URL (`/`) to choose purc
 - `/api/payments/status` — payment-status polling; `/api/receipts/download?ref=…` — PDF receipt for a confirmed payment
 - `/api/admin/receipt-settings` — Super Admin-only President/Treasurer names and signature images printed on PDF receipts
 - `/api/admin/sms-settings` — Super Admin-only SMS provider, API key, sender ID and message template
+- `/api/admin/email-settings` — Super Admin-only email provider (Brevo), API key, sender name/address, subject and message
+- `/api/admin/notifications` — failed SMS/email sends for the admin Delivery log; `POST /api/admin/notifications/[id]/resolve` marks one fixed
 - `/api/webhooks/paystack` — verifies Paystack signatures and independently verifies successful transactions before issuing a receipt
 - `/api/admin/payments` — authenticated payment records and dashboard totals
 - `/api/admin/settings` — Super Admin-only global payment-provider configuration
@@ -33,9 +35,22 @@ The login credentials determine the user's role (`SUPER_ADMIN` or `ADMIN`). Admi
 4. Generate Prisma Client: `npx prisma generate`.
 5. Seed the initial administrator and singleton payment configuration: `npm run prisma:seed`.
 6. Start locally: `npm run dev`; for production: `npm run build` then `npm start`.
-7. Sign in at `/admin/login` (no link on the public page - go to the URL directly). A Super Admin sets the Paystack keys under Payment settings and the SMS provider, API key and sender ID under SMS settings. The President/Treasurer signatories for receipts and the portal QR code are under Receipts & QR (Super Admin only).
+7. Sign in at `/admin/login` (no link on the public page - go to the URL directly). A Super Admin sets the Paystack keys under Payment settings and the SMS provider, API key and sender ID under SMS settings. Email receipts are set up under Email settings (see below). The President/Treasurer signatories for receipts and the portal QR code are under Receipts & QR (Super Admin only).
 
 Never commit `.env` or real payment-provider secrets. Provider secret and webhook keys are encrypted at rest using `ENCRYPTION_KEY`; do not change that key after saving credentials unless you first decrypt/re-encrypt the stored secrets.
+
+## Email receipts (Brevo)
+
+After a successful payment each student is emailed their receipt with the PDF attached, alongside the SMS. It is configured entirely in **Admin > Email settings** (Super Admin only); there are no new environment variables. The API key is encrypted with `ENCRYPTION_KEY`, like the SMS key. Email goes over Brevo's HTTPS API, so it works on Vercel (SMTP does not).
+
+One-time Brevo setup:
+
+1. Create a Brevo account and an API key (SMTP & API > API keys).
+2. Verify your sending domain in Brevo (Senders, Domains & Dedicated IPs > Domains). Brevo lists the DNS records (a verification TXT, DKIM, and optionally DMARC); add them at your DNS host (for Cloudflare, set CNAME records to *DNS only*). The sender address must be on this domain, e.g. `receipts@your-domain`, or mail goes to spam or is rejected.
+3. **Turn off IP blocking** in Brevo (Security > Authorised IPs). Vercel's outbound IP addresses change, so with blocking on Brevo rejects every send. The Delivery log shows a hint if this happens.
+4. In Email settings: choose Brevo, paste the key, set sender name and address, tick *Send email receipts*, save.
+
+Students with no email on file (registered before email became required) are skipped. A failed email never affects the payment or receipt; it is recorded in the **Delivery log** tab (all admins), where it can be marked fixed. Brevo's free plan has a daily send cap; check your plan against expected volume.
 
 ## Database
 

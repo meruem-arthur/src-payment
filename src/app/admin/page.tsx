@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { SmsSettingsForm } from "@/components/admin/sms-settings-form";
+import { EmailSettingsForm } from "@/components/admin/email-settings-form";
+import { DeliveryFailures } from "@/components/admin/delivery-failures";
 import { ReceiptSettingsForm } from "@/components/admin/receipt-settings-form";
 
 type Payment = {
@@ -26,7 +28,7 @@ export default function AdminDashboard() {
   const isSuper = (session?.user as any)?.role === "SUPER_ADMIN";
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"payments" | "settings" | "sms" | "receipts">("payments");
+  const [tab, setTab] = useState<"payments" | "settings" | "sms" | "email" | "receipts" | "delivery">("payments");
   const [config, setConfig] = useState<any>({ provider: "PAYSTACK", environment: "TEST", publicKey: "", secretKey: "", webhookSecret: "", configValue: "" });
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -94,11 +96,13 @@ export default function AdminDashboard() {
         </>
       }
     >
-      <nav className="flex gap-3">
+      <nav className="flex flex-wrap gap-3">
         <button onClick={() => setTab("payments")} className={tabClass(tab === "payments")}>Payment records</button>
         {isSuper && <button onClick={() => setTab("settings")} className={tabClass(tab === "settings")}>Payment settings</button>}
         {isSuper && <button onClick={() => setTab("sms")} className={tabClass(tab === "sms")}>SMS settings</button>}
+        {isSuper && <button onClick={() => setTab("email")} className={tabClass(tab === "email")}>Email settings</button>}
         {isSuper && <button onClick={() => setTab("receipts")} className={tabClass(tab === "receipts")}>Receipts &amp; QR</button>}
+        <button onClick={() => setTab("delivery")} className={tabClass(tab === "delivery")}>Delivery log</button>
       </nav>
 
       {tab === "payments" ? (
@@ -167,6 +171,10 @@ export default function AdminDashboard() {
         </>
       ) : tab === "sms" ? (
         <SmsSettingsForm />
+      ) : tab === "email" ? (
+        <EmailSettingsForm />
+      ) : tab === "delivery" ? (
+        <DeliveryFailures />
       ) : tab === "receipts" ? (
         <ReceiptSettingsForm />
       ) : (

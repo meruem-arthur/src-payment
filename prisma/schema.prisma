@@ -34,6 +34,10 @@ enum SmsProviderType {
   ARKESEL
   AFRICASTALKING
 }
+enum EmailProviderType {
+  MOCK
+  BREVO
+}
 enum NotificationChannel {
   SMS
   EMAIL
@@ -143,6 +147,20 @@ model SmsConfiguration {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   @@map("sms_configurations")
+}
+
+model EmailConfiguration {
+  id              String            @id @default("singleton")
+  provider        EmailProviderType @default(MOCK)
+  senderName      String            @default("UMaT SRC")
+  senderEmail     String            @default("")
+  subject         String            @default("Payment receipt {receipt} - UMaT SRC")
+  messageTemplate String            @default("Dear {name},\n\nYour payment of GHS {amount} for {items} has been received. Thank you.\n\nReference: {reference}\nReceipt number: {receipt}\n\nYour PDF receipt is attached to this email.\n\nUMaT SRC")
+  apiKey          String?
+  enabled         Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  @@map("email_configurations")
 }
 
 model ReceiptSettings {
