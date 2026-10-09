@@ -131,9 +131,9 @@ export class PaystackProvider implements PaymentProvider {
       currency: tx.currency,
       paidAt: tx.paid_at ? new Date(tx.paid_at) : null,
       raw: payload,
-      // Paystack doesn't send a distinct event id; the transaction id is unique per event stream
-      // and combined with the provider name in the DB unique constraint, giving us idempotency.
-      providerEventId: String(tx.id),
+      // Paystack doesn't send a distinct event id, so use event name + transaction id: the same event
+      // delivered twice dedupes, but a failure event can't mask a later success for the same transaction.
+      providerEventId: `${payload.event}:${tx.id}`,
     };
   }
 }

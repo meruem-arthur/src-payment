@@ -1,9 +1,11 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { PRODUCTS } from "@/lib/catalog";
 import { decryptSmsApiKey } from "@/lib/crypto/field-encryption";
 import { generateReceiptPdf } from "@/lib/receipts-pdf";
 import { getSmsProvider, type SmsProviderName } from "@/lib/sms/provider-factory";
 import { renderSmsTemplate } from "@/lib/sms/template";
+import { nextReceiptNumber } from "@/lib/receipt-number";
 import { captureError } from "@/lib/monitoring/capture-error";
 
 type LineItem = { id?: string; label: string; amount: number };
@@ -13,12 +15,10 @@ function lineItems(items: unknown): LineItem[] {
   return items.filter((i): i is LineItem => !!i && typeof i.label === "string" && typeof i.amount === "number");
 }
 
-/** REC-<year>-<6 digit sequence>. `offset` lets a retry step past a number another request just took. */
-export async function generateReceiptNumber(offset = 0): Promise<string> {
-  const year = new Date().getFullYear();
-  const count = await prisma.receipt.count({ where: { receiptNumber: { startsWith: `REC-${year}-` } } });
-  return `REC-${year}-${(count + 1 + offset).toString().padStart(6, "0")}`;
-}
+// Arbitrary constant. Whoever holds this database lock is the only request
+// numbering a receipt, so receipt numbers come out one at a time with no gaps
+// and no collisions, however many payments are confirmed in the same moment.
+const RECEIPT_LOCK_KEY = 72707371;
 
 /**
  * Creates the receipt for a SUCCESS payment. Safe to call repeatedly or
@@ -32,17 +32,26 @@ export async function issueReceipt(paymentId: string) {
   const existing = await prisma.receipt.findUnique({ where: { paymentId } });
   if (existing) return { receipt: existing, created: false };
 
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const receipt = await prisma.receipt.create({ data: { receiptNumber: await generateReceiptNumber(attempt), paymentId, studentId: payment.studentId } });
+  try {
+    return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Queue up here. The lock is released automatically when this transaction ends.
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${RECEIPT_LOCK_KEY})`);
+      // Someone else may have issued this payment's receipt while we waited.
+      const already = await tx.receipt.findUnique({ where: { paymentId } });
+      if (already) return { receipt: already, created: false };
+      const year = new Date().getFullYear();
+      const issued = await tx.receipt.findMany({ where: { receiptNumber: { startsWith: `REC-${year}-` } }, select: { receiptNumber: true } });
+      const receipt = await tx.receipt.create({ data: { receiptNumber: nextReceiptNumber(issued.map((r: { receiptNumber: string }) => r.receiptNumber), year), paymentId, studentId: payment.studentId } });
       return { receipt, created: true };
-    } catch (err: any) {
-      if (err?.code !== "P2002") throw err;
+    }, { maxWait: 10_000, timeout: 20_000 });
+  } catch (err: any) {
+    // Belt and braces: if a unique clash still happens, the payment's receipt exists - hand that back.
+    if (err?.code === "P2002") {
       const winner = await prisma.receipt.findUnique({ where: { paymentId } });
       if (winner) return { receipt: winner, created: false };
     }
+    throw err;
   }
-  throw new Error("Could not allocate a unique receipt number after several attempts");
 }
 
 /** Builds the PDF for a confirmed payment, looked up by its public payment reference. Null if there is no receipt yet. */
