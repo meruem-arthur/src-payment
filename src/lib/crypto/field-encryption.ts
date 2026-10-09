@@ -2,8 +2,7 @@ import crypto from "crypto";
 
 /**
  * Field-level encryption for the secrets we store at rest:
- * PaymentProviderConfiguration.secretKey / .webhookSecret, and
- * SmsConfiguration.apiKey. AES-256-GCM via Node's built-in crypto - no new
+ * PaymentProviderConfiguration.secretKey / .webhookSecret. AES-256-GCM via Node's built-in crypto - no new
  * dependency, no external KMS to provision.
  *
  * The encryption key itself lives ONLY in the ENCRYPTION_KEY env var, never
@@ -73,7 +72,7 @@ export function isEncrypted(value: string | null | undefined): boolean {
  * Decrypts the two secret fields on a PaymentProviderConfiguration row.
  * Call this exactly once, right after loading the config from the DB, and
  * use the returned object everywhere downstream (provider calls, signature
- * verification) - never read department.paymentConfig.secretKey directly.
+ * verification) - never read system payment configuration secretKey directly.
  */
 export function decryptPaymentSecrets<T extends { secretKey: string | null; webhookSecret: string | null }>(
   config: T

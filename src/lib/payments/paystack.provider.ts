@@ -32,7 +32,7 @@ export class PaystackProvider implements PaymentProvider {
     credentials: ProviderCredentials
   ): Promise<InitiatePaymentResult> {
     if (!credentials.secretKey) {
-      throw new Error("Paystack secret key is not configured for this department");
+      throw new Error("Paystack secret key is not configured for this system");
     }
 
     const res = await fetch(`${PAYSTACK_BASE_URL}/transaction/initialize`, {
@@ -48,9 +48,9 @@ export class PaystackProvider implements PaymentProvider {
         reference: input.internalReference,
         callback_url: input.callbackUrl,
         metadata: input.metadata,
-        // Department's Paystack subaccount code (e.g. ACCT_xxxxxxx), set via
+        // System Paystack subaccount code (e.g. ACCT_xxxxxxx), set via
         // the payment-config admin form and stored as configValue. Omitted
-        // entirely when not set, so departments without a subaccount keep
+        // entirely when not set, so systems without a subaccount keep
         // funds going straight to the main Paystack account as before.
         ...(credentials.configValue ? { subaccount: credentials.configValue, bearer: "subaccount" } : {}),
       }),
@@ -72,7 +72,7 @@ export class PaystackProvider implements PaymentProvider {
     credentials: ProviderCredentials
   ): Promise<VerifiedTransaction> {
     if (!credentials.secretKey) {
-      throw new Error("Paystack secret key is not configured for this department");
+      throw new Error("Paystack secret key is not configured for this system");
     }
 
     // Paystack's verify endpoint is keyed by the transaction REFERENCE

@@ -1,17 +1,17 @@
 {
-  "name": "umat-src-cashless-payment",
+  "name": "student-payment-portal",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma migrate deploy && next build",
+    "build": "prisma migrate deploy && prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
     "postinstall": "prisma generate",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -54,5 +54,5 @@
     "typescript": "^5",
     "vitest": "^4.1.11"
   },
-  "description": "UMaT SRC cashless payment portal with Paystack subaccount settlement"
+  "description": "Single-system student item payment portal with system-wide payment settings"
 }

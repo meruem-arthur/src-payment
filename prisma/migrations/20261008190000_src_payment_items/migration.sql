@@ -1,1 +1,0 @@
-ALTER TABLE "payments" ADD COLUMN "items" JSONB;

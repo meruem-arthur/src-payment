@@ -1,5 +1,5 @@
-import { AdminLoginForm } from "@/components/auth/admin-login-form";
-
-export default function AdminLoginPage() {
-  return <AdminLoginForm portal="ADMIN" />;
-}
+"use client";
+import { FormEvent, useState } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
+export default function AdminLogin() { const [email,setEmail]=useState(""); const [password,setPassword]=useState(""); const [error,setError]=useState(""); const [busy,setBusy]=useState(false); const router=useRouter(); const params=useSearchParams(); async function submit(e:FormEvent){e.preventDefault();setBusy(true);setError("");const result=await signIn("credentials",{email,password,redirect:false,callbackUrl:params.get("callbackUrl")||"/admin"});if(result?.error){setError("Invalid email or password, or account is inactive.");setBusy(false);}else router.replace(result?.url||"/admin");} return <main className="mx-auto flex min-h-screen max-w-md items-center px-5"><form onSubmit={submit} className="w-full rounded-2xl border border-white/10 bg-white/5 p-8"><p className="text-sm uppercase tracking-widest text-violet-300">Payment Portal</p><h1 className="mb-6 mt-2 text-3xl font-bold">Administrator sign in</h1><label className="mb-4 block text-sm">Email<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} className="mt-2 w-full rounded-lg border border-white/15 bg-black/20 p-3"/></label><label className="mb-4 block text-sm">Password<input required type="password" value={password} onChange={e=>setPassword(e.target.value)} className="mt-2 w-full rounded-lg border border-white/15 bg-black/20 p-3"/></label>{error&&<p className="mb-4 text-red-300">{error}</p>}<button disabled={busy} className="w-full rounded-lg bg-violet-600 p-3 font-semibold disabled:opacity-50">{busy?"Signing in…":"Sign in"}</button><a href="/" className="mt-5 block text-center text-sm text-slate-400">Return to student payments</a></form></main>; }

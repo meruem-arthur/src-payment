@@ -1,144 +1,46 @@
-# UMaT SRC Cashless Payment System
+# Student Payment Portal
 
-A focused one-department cashless collection portal for the UMaT Student Representative Council.
+A single-system payment portal. Students visit the root URL (`/`) to choose purchasable items and pay. There are no student-facing slugs, department pages, academic sessions, student levels, CSV student imports, or dues-clearance workflows.
 
-## What it does
+## Routes
 
-- One public QR destination: `/d/src`
-- No student accounts
-- Student enters:
-  - Full name
-  - Student ID / reference number
-  - Phone
-  - Optional email
-- Student selects any combination of:
-  - Drawing Board — GHS 390
-  - Safety Boot — GHS 300
-  - Helmet — GHS 60
-  - Goggles — GHS 45
-  - Earplugs — GHS 15
-  - Safety Vest — GHS 50
-- Total is calculated on the server, not trusted from the browser.
-- Drawing Board + complete PPE = GHS 860.
-- Paystack Checkout handles the payment.
-- Paystack webhook + server-side verification confirms payment.
-- Successful payments receive a unique receipt and downloadable PDF.
-- Receipt includes the purchased items, amount, student details, receipt number and verification QR.
-- Admin dashboard retains the payment history.
-- Paystack subaccount code is configurable from the admin payment settings.
+- `/` — public student checkout (main domain, no slug)
+- `/payment-status` — payment-return information
+- `/admin/login` — the single administrator sign-in page
+- `/admin` — payment dashboard; Super Admin accounts also see system-wide provider settings
+- `/api/payments/initiate` — validates checkout selections server-side and initializes a provider transaction
+- `/api/webhooks/paystack` — verifies Paystack signatures and independently verifies successful transactions before issuing a receipt
+- `/api/admin/payments` — authenticated payment records and dashboard totals
+- `/api/admin/settings` — Super Admin-only global payment-provider configuration
+- `/api/admin-users` — Super Admin-only administrator account management
 
-## Paystack settlement
+The login credentials determine the user's role (`SUPER_ADMIN` or `ADMIN`). Admins use the same login URL; authorization is enforced server-side.
 
-The SRC portal uses one Paystack subaccount as the settlement destination.
+## Requirements
 
-The code sends:
+- Node.js 20+
+- PostgreSQL
+- Paystack account for hosted checkout (Paystack is the configured and verified provider in this version)
 
-```text
-subaccount: ACCT_xxxxx
-bearer: "subaccount"
-```
+## Configure and run
 
-No dynamic split logic is used.
+1. Copy `.env.example` to `.env` and fill in `DATABASE_URL`, `AUTH_SECRET`, `ENCRYPTION_KEY`, `NEXT_PUBLIC_APP_URL`, and the initial Super Admin credentials. Generate keys with `openssl rand -base64 32`.
+2. Install dependencies: `npm ci`.
+3. Apply database migrations: `npx prisma migrate deploy`.
+4. Generate Prisma Client: `npx prisma generate`.
+5. Seed the initial administrator and singleton payment configuration: `npm run prisma:seed`.
+6. Start locally: `npm run dev`; for production: `npm run build` then `npm start`.
+7. Sign in at `/admin/login`. A Super Admin can set provider keys under Payment settings.
 
-For the intended setup, create the SRC subaccount under the approved Paystack integration with a `percentage_charge` of `0`, so the main account does not receive a percentage of the collection. Paystack's transaction fee can be borne by the subaccount through `bearer: "subaccount"`.
+Never commit `.env` or real payment-provider secrets. Provider secret and webhook keys are encrypted at rest using `ENCRYPTION_KEY`; do not change that key after saving credentials unless you first decrypt/re-encrypt the stored secrets.
 
-Always verify the SRC bank account details before creating/using the subaccount.
+## Database
 
-## Deployment
+The project ships a single initial migration (`20261009000000_init`) that creates the whole single-system schema. For a fresh or wiped database run `npx prisma migrate deploy` (or `npx prisma migrate reset --force` to wipe an existing development database first), then `npm run prisma:seed`. Back up production data before running any migration.
 
-### 1. Neon
+## Important operational notes
 
-Create a PostgreSQL database and set:
-
-```env
-DATABASE_URL="..."
-```
-
-### 2. Vercel environment variables
-
-Set at minimum:
-
-```env
-DATABASE_URL="..."
-AUTH_SECRET="..."
-NEXT_PUBLIC_APP_URL="https://your-domain.com"
-ENCRYPTION_KEY="..."
-CRON_SECRET="..."
-```
-
-If email/SMS/Sentry are not needed for launch, they can remain unset. `SENTRY_DSN` is optional error monitoring. `CRON_SECRET` protects the scheduled payment-reconciliation endpoint; generate a random value with `openssl rand -hex 32`. `ENCRYPTION_KEY` must be a base64-encoded 32-byte key (`openssl rand -base64 32`) before saving Paystack/SMS secrets through the admin UI. SMS provider API credentials and sender ID are configured in the admin's SRC SMS Settings; setting `SMS_PROVIDER` alone does not supply an API key. Email delivery requires `EMAIL_PROVIDER=BREVO`, `EMAIL_API_KEY`, and a verified `EMAIL_FROM_ADDRESS` if receipts should be emailed.
-
-### 3. Deploy
-
-The build command runs:
-
-```bash
-prisma migrate deploy && next build
-```
-
-The included migration adds the SRC payment line-item JSON field.
-
-### 4. Create the first Super Admin (required)
-
-Set these environment variables before running the seed. Use a unique password of at least 12 characters.
-
-```env
-SRC_SUPER_ADMIN_EMAIL="your-super-admin-email"
-SRC_SUPER_ADMIN_PASSWORD="a-unique-password-at-least-12-characters"
-```
-
-Optionally create the first day-to-day Admin at the same time:
-
-```env
-SRC_ADMIN_EMAIL="your-admin-email"
-SRC_ADMIN_PASSWORD="another-unique-password-at-least-12-characters"
-```
-
-Run `npm run prisma:seed` once against the production Neon database. The seed creates the SRC department, the Super Admin, and the optional initial Admin. Afterward, the Super Admin can create additional Admins at `/admins`; no redeploy or environment change is needed for future Admin accounts. Do not expose a public Super Admin registration route and do not commit real credentials.
-
-Then run:
-
-```bash
-npm run prisma:seed
-```
-
-This creates the single `src` department and `/d/src` public portal.
-
-### 5. Configure Paystack
-
-Log in to the SRC admin area:
-
-```text
-Departments → SRC → Payment Configuration
-```
-
-Set:
-
-- Provider: Paystack
-- Environment: Live
-- Public Key
-- Secret Key
-- No separate webhook secret is required for Paystack: the webhook signature is HMAC-SHA512 verified with the Paystack Secret Key. (The separate webhook-secret field is used by other providers in the inherited multi-provider engine.)
-- Paystack Subaccount Code: `ACCT_...`
-
-The secret values are encrypted before being stored.
-
-### 6. Paystack webhook
-
-Configure Paystack to send events to:
-
-```text
-https://your-domain.com/api/webhooks/paystack
-```
-
-The webhook is verified using the Paystack Secret Key (the `x-paystack-signature` is an HMAC-SHA512 signature). The URL is where Paystack sends the event; it is not itself a secret. The transaction is then re-verified directly with Paystack before the payment is marked successful.
-
-## Important
-
-Do not put the Paystack secret key in frontend code.
-
-Do not trust an amount supplied by the browser.
-
-Do not mark a payment successful merely because the student returns to the callback URL.
-
-The server calculates the item total, creates the pending payment record, initializes Paystack, verifies the webhook, re-verifies the transaction, and only then issues the receipt.
+- Payment amounts and product IDs are validated server-side; never trust a client-submitted amount.
+- A payment is not considered successful based on the browser redirect. The webhook validates the signature and verifies the transaction with Paystack before marking it successful.
+- Configure Paystack's webhook URL as `https://YOUR_DOMAIN/api/webhooks/paystack`.
+- The current checkout catalogue and prices are defined in `src/lib/catalog.ts` (used by both the checkout page and the server); change them there only.
