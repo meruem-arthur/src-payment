@@ -1,6 +1,7 @@
 "use client";
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { ReceiptActions } from "@/components/receipts/receipt-actions";
 
 type Info = { status: string; receiptNumber: string | null } | null;
 
@@ -41,14 +42,14 @@ function Status() {
         </div>
         {done ? <>
           <h1 className="text-2xl font-bold text-portal-text">Payment confirmed</h1>
-          <p className="text-sm text-portal-muted">Thank you. Your receipt number is <strong>{info!.receiptNumber}</strong>. A confirmation SMS is on its way to your phone.</p>
-          <a href={`/api/receipts/download?ref=${encodeURIComponent(ref!)}`} className="portal-btn-primary inline-block">Download receipt (PDF)</a>
+          <p className="text-sm text-portal-muted">Thank you. Your receipt number is <strong>{info!.receiptNumber}</strong>. A copy is also being sent to your phone by SMS and to your email address.</p>
+          <ReceiptActions downloadUrl={`/api/receipts/download?ref=${encodeURIComponent(ref!)}`} fileName={`${info!.receiptNumber}.pdf`} />
         </> : failed ? <>
           <h1 className="text-2xl font-bold text-portal-text">Payment not completed</h1>
           <p className="text-sm text-portal-muted">The payment was not successful and you have not been charged for this attempt. You can go back and try again.</p>
         </> : <>
           <h1 className="text-2xl font-bold text-portal-text">Payment submitted</h1>
-          <p className="text-sm text-portal-muted">{tries > 30 ? "This is taking longer than usual. Your receipt will be texted to you once the payment is confirmed - please don't pay again." : "We are confirming your payment with the payment provider. This page updates automatically."}</p>
+          <p className="text-sm text-portal-muted">{tries > 30 ? "This is taking longer than usual. Your receipt will be sent to you once the payment is confirmed - please don't pay again." : "We are confirming your payment with the payment provider. This page updates automatically."}</p>
         </>}
         <p className="break-all text-xs text-portal-muted">Reference: {ref || "Not available"}</p>
         {!waiting && <a href="/" className="portal-btn-secondary inline-block">Back to payment portal</a>}
