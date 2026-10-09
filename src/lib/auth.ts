@@ -15,7 +15,7 @@ const LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 export const authOptions: AuthOptions = {
   session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
+  pages: { signIn: "/admin/login" },
   providers: [
     CredentialsProvider({
       name: "credentials",

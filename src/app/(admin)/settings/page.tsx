@@ -8,7 +8,7 @@ import { SUPPORT_SETTINGS_ID } from "@/lib/support-request";
 
 export default async function SettingsPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
+  if (!session?.user) redirect("/admin/login");
   const user = session.user as any;
   // Contact Support destination is system-wide, so only the super admin
   // sees (and may change) it.

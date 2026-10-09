@@ -51,7 +51,7 @@ export function ResetPasswordForm() {
       }
 
       setSuccess(true);
-      setTimeout(() => router.push("/login"), 2000);
+      setTimeout(() => router.push("/admin/login"), 2000);
     } finally {
       setLoading(false);
     }

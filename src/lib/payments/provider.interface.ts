@@ -19,6 +19,7 @@ export type InitiatePaymentInput = {
     academicSessionId: string;
     studentId: string;
     paymentType: "FRESHER" | "CONTINUING";
+    items?: { id: string; label: string; amount: number }[];
   };
   callbackUrl: string;
 };

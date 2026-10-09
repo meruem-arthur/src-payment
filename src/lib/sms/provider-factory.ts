@@ -10,10 +10,11 @@ import { ArkeselSmsProvider } from "./arkesel.provider";
  * the mock provider - which only logs, never actually sends - if unset.
  */
 export function getSmsProvider(): SMSProvider {
-  if (process.env.SMS_PROVIDER === "ARKESEL") {
+  const choice = (process.env.SMS_PROVIDER ?? "").trim().toUpperCase();
+  if (choice === "ARKESEL") {
     return new ArkeselSmsProvider();
   }
-  if (process.env.SMS_PROVIDER === "AFRICASTALKING") {
+  if (choice === "AFRICASTALKING") {
     return new AfricasTalkingSmsProvider();
   }
   return new MockSmsProvider();

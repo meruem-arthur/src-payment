@@ -6,7 +6,7 @@ import { captureError } from "@/lib/monitoring/capture-error";
 // GET /api/receipts/download?ref=<payment.internalReference>
 //
 // Public by design - same trust model as the payment-status page it's
-// linked from (src/app/d/[departmentSlug]/payment-status/page.tsx): the
+// linked from (src/app/payment-status/page.tsx): the
 // internalReference is a server-generated, unguessable identifier, not a
 // sequential id, and it's the same key that page already uses to look up
 // and display the payment with no login required. No new exposure here,

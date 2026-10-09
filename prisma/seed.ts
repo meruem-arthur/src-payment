@@ -38,7 +38,7 @@ async function main() {
   const superPasswordHash = await bcrypt.hash(superAdminPassword, 12);
   await prisma.user.upsert({
     where: { email: superAdminEmail },
-    update: { passwordHash: superPasswordHash, role: "SUPER_ADMIN", departmentId: null, status: "ACTIVE" },
+    update: {}, // never reset an existing Super Admin from env vars
     create: { name: "SRC Super Admin", email: superAdminEmail, passwordHash: superPasswordHash, role: "SUPER_ADMIN", departmentId: null },
   });
 
@@ -48,7 +48,7 @@ async function main() {
     const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
     await prisma.user.upsert({
       where: { email: adminEmail },
-      update: { passwordHash: adminPasswordHash, role: "DEPARTMENT_ADMIN", departmentId: department.id, status: "ACTIVE" },
+      update: {}, // never reset an existing Admin from env vars
       create: { name: "SRC Administrator", email: adminEmail, passwordHash: adminPasswordHash, role: "DEPARTMENT_ADMIN", departmentId: department.id },
     });
   }

@@ -83,7 +83,7 @@ export function AdminSidebar({ userName, role }: { userName: string; role: strin
           </div>
         </div>
         <button
-          onClick={() => signOut({ callbackUrl: "/login" })}
+          onClick={() => signOut({ callbackUrl: "/admin/login" })}
           className="admin-nav-link w-full justify-start"
         >
           <LogOut size={18} />
