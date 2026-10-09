@@ -10,7 +10,7 @@ import { getRecentNotificationFailures } from "@/lib/notification-failures";
 
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
+  if (!session?.user) redirect("/admin/login");
   const user = session.user as any;
 
   const notificationFailures = await getRecentNotificationFailures(user);

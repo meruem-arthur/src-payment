@@ -12,7 +12,7 @@ const PRODUCTS = [
   { id: "VEST", label: "Safety Vest", amount: 50 },
 ] as const;
 
-export function SrcPaymentForm({ departmentSlug }: { departmentSlug: string }) {
+export function SrcPaymentForm() {
   const [fullName, setFullName] = useState("");
   const [referenceNumber, setReferenceNumber] = useState("");
   const [phone, setPhone] = useState("");
@@ -49,7 +49,6 @@ export function SrcPaymentForm({ departmentSlug }: { departmentSlug: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          departmentSlug,
           fullName,
           referenceNumber,
           phone,

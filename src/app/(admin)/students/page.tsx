@@ -11,7 +11,7 @@ export default async function StudentsPage({
   searchParams: { departmentId?: string };
 }) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
+  if (!session?.user) redirect("/admin/login");
   const user = session.user as any;
 
   let departmentId: string | undefined;

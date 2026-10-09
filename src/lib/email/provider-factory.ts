@@ -8,7 +8,7 @@ import { BrevoEmailProvider } from "./brevo.provider";
  * mock provider - which only logs, never actually sends - if unset.
  */
 export function getEmailProvider(): EmailProvider {
-  if (process.env.EMAIL_PROVIDER === "BREVO") {
+  if ((process.env.EMAIL_PROVIDER ?? "").trim().toUpperCase() === "BREVO") {
     return new BrevoEmailProvider();
   }
   return new MockEmailProvider();

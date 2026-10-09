@@ -5,7 +5,7 @@ import { AdminManagementClient } from "@/components/admin/admin-management-clien
 
 export default async function AdminsPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
+  if (!session?.user) redirect("/admin/login");
   if ((session.user as any).role !== "SUPER_ADMIN") redirect("/dashboard");
   return (
     <div className="space-y-6">

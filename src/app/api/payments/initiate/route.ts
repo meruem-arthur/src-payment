@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getPaymentProvider } from "@/lib/payments/provider-factory";
 import { decryptPaymentSecrets } from "@/lib/crypto/field-encryption";
 import { captureError } from "@/lib/monitoring/capture-error";
+import { SRC_SLUG } from "@/lib/src-config";
 
 const PRODUCTS = {
   DRAWING_BOARD: { label: "Drawing Board", amount: 390 },
@@ -22,7 +23,7 @@ function clean(value: unknown) {
 export async function POST(req: NextRequest) {
   try {
     const input = await req.json();
-    const departmentSlug = clean(input.departmentSlug);
+    const departmentSlug = SRC_SLUG;
     const fullName = clean(input.fullName);
     const referenceNumber = clean(input.referenceNumber);
     const phone = clean(input.phone);
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
     }
 
     const validItems = items.filter((id: unknown): id is ProductId => typeof id === "string" && id in PRODUCTS);
-    const uniqueItems = [...new Set(validItems)];
+    const uniqueItems: ProductId[] = Array.from(new Set<ProductId>(validItems));
     if (uniqueItems.length === 0 || uniqueItems.length !== items.length) {
       return NextResponse.json({ error: "Please select valid SRC payment items." }, { status: 400 });
     }
@@ -52,9 +53,9 @@ export async function POST(req: NextRequest) {
     if (department.paymentConfig.provider !== "PAYSTACK") {
       return NextResponse.json({ error: "SRC cashless portal must use Paystack." }, { status: 400 });
     }
-    if (!department.paymentConfig.configValue) {
-      return NextResponse.json({ error: "SRC Paystack subaccount is not configured yet." }, { status: 400 });
-    }
+    // The subaccount code is OPTIONAL. With one set, Paystack splits the
+    // payment to that subaccount; without one, funds settle directly to the
+    // Paystack account that owns the secret key.
 
     // The amount is calculated ONLY on the server from the approved SRC price list.
     const lineItems = uniqueItems.map((id) => ({ id, label: PRODUCTS[id].label, amount: PRODUCTS[id].amount }));
@@ -167,13 +168,13 @@ export async function POST(req: NextRequest) {
           phone,
           internalReference,
           metadata: {
-            paymentType: "SRC_PURCHASE",
+            paymentType: "CONTINUING", // legacy field required by the shared provider type; real data is in `items`
             studentReference: referenceNumber,
             departmentId: department.id,
             studentId: student.id,
             items: lineItems,
           },
-          callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/d/${department.slug}/payment-status?ref=${encodeURIComponent(internalReference)}`,
+          callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/payment-status?ref=${encodeURIComponent(internalReference)}`,
         },
         {
           publicKey: paymentConfig.publicKey,
