@@ -2,6 +2,7 @@
 import { FormEvent, Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { PasswordInput } from "@/components/password-input";
 
 function LoginForm() {
   const [email, setEmail] = useState("");
@@ -47,7 +48,7 @@ function LoginForm() {
           </label>
           <label className="block text-sm font-medium text-portal-text">
             Password
-            <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="portal-input mt-1" />
+            <PasswordInput required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </label>
           {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
           <button disabled={busy} className="portal-btn-primary w-full">
