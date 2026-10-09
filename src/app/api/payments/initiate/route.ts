@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
   try {
     const input = await req.json(); const fullName = clean(input.fullName); const referenceNumber = clean(input.referenceNumber); const phone = clean(input.phone); const email = clean(input.email); const items = Array.isArray(input.items) ? input.items : [];
     if (!fullName || !referenceNumber || !phone) return NextResponse.json({ error: "Name, student/reference number and phone are required." }, { status: 400 });
+    if (!/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: "A valid email address is required." }, { status: 400 });
     const unique = validateProductSelection(items);
     if (!unique) return NextResponse.json({ error: "Select at least one valid item." }, { status: 400 });
     const rawConfig = await prisma.paymentProviderConfiguration.findUnique({ where: { id: "singleton" } });
