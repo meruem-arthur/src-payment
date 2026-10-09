@@ -39,3 +39,10 @@ body { background: #0d0a14; color: #f1eefb; }
 .portal-crest img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35)); }
 .portal-heading-on-photo { color: #0b7a70; text-shadow: 0 2px 6px rgba(255,255,255,0.85), 0 1px 2px rgba(255,255,255,0.9); }
 .portal-text-on-photo { color: #1a2332; text-shadow: 0 1px 4px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(255, 255, 255, 0.95); }
+
+/* Admin pages reuse the portal look: same campus photo, glass cards, glass buttons. */
+.portal-card-glass { background-color: rgba(255, 255, 255, 0.74); backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%); border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 0.9rem; box-shadow: 0 10px 34px -14px rgba(15, 23, 32, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.7); }
+.portal-btn-ghost { background-color: rgba(15, 155, 142, 0.1); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(15, 155, 142, 0.35); color: #0b7a70; font-weight: 600; border-radius: 0.6rem; padding: 0.55rem 1.1rem; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5); transition: background-color 0.15s ease; }
+.portal-btn-ghost:hover { background-color: rgba(15, 155, 142, 0.2); }
+.portal-btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.portal-btn-primary:active, .portal-btn-ghost:active { transform: scale(0.98); }

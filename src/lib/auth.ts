@@ -20,7 +20,16 @@ export const authOptions: AuthOptions = {
     },
   })],
   callbacks: {
-    async jwt({ token, user }) { if (user) { token.id = (user as any).id; token.role = (user as any).role; } return token; },
+    async jwt({ token, user, trigger }) {
+      if (user) { token.id = (user as any).id; token.role = (user as any).role; }
+      // After the account is edited the client calls session update(). Re-read
+      // name/email from the database (never from the browser) and leave role alone.
+      if (trigger === "update" && token.id) {
+        const fresh = await prisma.user.findUnique({ where: { id: token.id as string }, select: { name: true, email: true } });
+        if (fresh) { token.name = fresh.name; token.email = fresh.email; }
+      }
+      return token;
+    },
     async session({ session, token }) { if (session.user) { (session.user as any).id = token.id; (session.user as any).role = token.role; } return session; },
   },
   secret: process.env.AUTH_SECRET,
