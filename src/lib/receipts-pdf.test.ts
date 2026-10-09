@@ -33,3 +33,21 @@ describe("receipt pdf signatories", () => {
     expect(bytes.length).toBeGreaterThan(500);
   });
 });
+
+describe("receipt pdf verification QR", () => {
+  const items = Array.from({ length: 8 }, (_, i) => ({ label: `Item ${i + 1}`, amount: 10 }));
+  const payment = { internalReference: "PAY-4", currency: "GHS", amount: 80, provider: "PAYSTACK", paidAt: null, items };
+  it("adds the QR (a larger file, and room for it on long receipts) only when a verify link is given", async () => {
+    const { PDFDocument } = await import("pdf-lib");
+    const plain = await generateReceiptPdf({ ...base, payment });
+    const withQr = await generateReceiptPdf({ ...base, payment, verifyUrl: "https://pay.example.com/verify/REC-2026-000001?t=abc" });
+    expect(Buffer.from(withQr).subarray(0, 4).toString()).toBe("%PDF");
+    expect(withQr.length).toBeGreaterThan(plain.length);
+    const h = async (b: Uint8Array) => (await PDFDocument.load(b)).getPage(0).getHeight();
+    expect(await h(withQr)).toBeGreaterThan(await h(plain));
+  });
+  it("still issues the receipt if the QR link is unusable", async () => {
+    const bytes = await generateReceiptPdf({ ...base, payment, verifyUrl: "x".repeat(5000) });
+    expect(Buffer.from(bytes).subarray(0, 4).toString()).toBe("%PDF");
+  });
+});

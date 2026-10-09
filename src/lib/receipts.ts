@@ -8,6 +8,7 @@ import { renderSmsTemplate } from "@/lib/sms/template";
 import { getEmailProvider, type EmailProviderName } from "@/lib/email/provider-factory";
 import { renderEmailTemplate, singleLine } from "@/lib/email/template";
 import { nextReceiptNumber } from "@/lib/receipt-number";
+import { receiptVerifyUrl } from "@/lib/receipt-verify";
 import { captureError } from "@/lib/monitoring/capture-error";
 
 type LineItem = { id?: string; label: string; amount: number };
@@ -62,7 +63,11 @@ export async function buildReceiptPdf(internalReference: string) {
   if (!payment || payment.status !== "SUCCESS" || !payment.receipt) return null;
   const items = lineItems(payment.items);
   const rs = await prisma.receiptSettings.findUnique({ where: { id: "singleton" } }).catch(() => null);
+  // The QR on the PDF. If it can't be made (e.g. NEXT_PUBLIC_APP_URL unset) the receipt is still issued, just without it.
+  let verifyUrl: string | null = null;
+  try { verifyUrl = receiptVerifyUrl(payment.receipt.receiptNumber); } catch (e) { captureError(e, { context: "receipt-verify-url" }); }
   const pdfBytes = await generateReceiptPdf({
+    verifyUrl,
     receiptNumber: payment.receipt.receiptNumber,
     issuedAt: payment.receipt.issuedAt,
     student: { fullName: payment.student.fullName, referenceNumber: payment.student.referenceNumber },

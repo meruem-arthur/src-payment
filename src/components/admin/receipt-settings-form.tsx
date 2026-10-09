@@ -1,6 +1,6 @@
 "use client";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import QRCode from "qrcode";
+import { brandedQrDataUrl } from "@/lib/branded-qr";
 
 type Config = { presidentName: string; presidentSignature: string | null; treasurerName: string; treasurerSignature: string | null };
 type Who = "president" | "treasurer";
@@ -30,7 +30,7 @@ function PortalQr() {
   useEffect(() => {
     const url = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
     setLink(url);
-    QRCode.toDataURL(url, { width: 640, margin: 2, color: { dark: "#111111", light: "#ffffff" } }).then(setQr).catch(() => setQr(""));
+    brandedQrDataUrl(url).then(setQr).catch(() => setQr(""));
   }, []);
   return (
     <section className="portal-card-glass max-w-2xl p-6">

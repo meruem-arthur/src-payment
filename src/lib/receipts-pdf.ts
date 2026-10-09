@@ -1,7 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
 import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from "pdf-lib";
+import QRCode from "qrcode";
 import { BRANDING } from "@/lib/branding";
+import { QR_LOGO_BASE64 } from "@/lib/qr-logo";
 
 export type ReceiptPdfData = {
   receiptNumber: string;
@@ -15,6 +17,8 @@ export type ReceiptPdfData = {
     paidAt: Date | null;
     items: { label: string; amount: number }[];
   };
+  // When set, a QR code for this link is printed at the bottom ("Scan to verify this receipt").
+  verifyUrl?: string | null;
   // Set by the Super Admin (Admin > Receipts & QR). Shown only if configured.
   signatories?: {
     president?: { name?: string | null; signatureUrl?: string | null } | null;
@@ -75,6 +79,31 @@ function wrap(font: PDFFont, text: string, size: number, maxWidth: number): stri
   return lines.length ? lines : [""];
 }
 
+const QR_SIZE = 84; // points
+const QR_BLOCK_HEIGHT = 112; // QR + caption + breathing room, added to the page when a QR is printed
+
+/**
+ * Draws a verification QR with the SRC crest in the middle. Error correction
+ * level H survives ~30% damage, and the crest covers only ~5% of the code's
+ * area, so it still scans. Any failure just means no QR - never a failed receipt.
+ */
+async function drawVerifyQr(pdfDoc: PDFDocument, page: PDFPage, url: string, bold: PDFFont) {
+  try {
+    const png = await QRCode.toBuffer(url, { errorCorrectionLevel: "H", margin: 0, width: 420, color: { dark: "#111111", light: "#ffffff" } });
+    const qr = await pdfDoc.embedPng(png);
+    const x = (PAGE_WIDTH - QR_SIZE) / 2, y = 34;
+    page.drawRectangle({ x: x - 5, y: y - 5, width: QR_SIZE + 10, height: QR_SIZE + 10, color: rgb(1, 1, 1) }); // quiet zone
+    page.drawImage(qr, { x, y, width: QR_SIZE, height: QR_SIZE });
+    try {
+      const logo = await pdfDoc.embedPng(Buffer.from(QR_LOGO_BASE64, "base64"));
+      const back = QR_SIZE * 0.24, mark = QR_SIZE * 0.2, cx = x + QR_SIZE / 2, cy = y + QR_SIZE / 2;
+      page.drawRectangle({ x: cx - back / 2, y: cy - back / 2, width: back, height: back, color: rgb(1, 1, 1) });
+      page.drawImage(logo, { x: cx - mark / 2, y: cy - mark / 2, width: mark, height: mark });
+    } catch { /* QR without the crest still scans */ }
+    centered(page, "Scan to verify this receipt", 20, 8, bold, GREEN);
+  } catch { /* a receipt is never blocked by its QR */ }
+}
+
 const money = (n: number) => (Number.isInteger(n) ? n.toFixed(2) : n.toFixed(2));
 const fmtDate = (d: Date) => d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Africa/Accra" });
 
@@ -111,7 +140,7 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Uint8Arr
     { role: "Treasurer", name: sig?.treasurer?.name?.trim() || "", image: await embedDataUrlImage(pdfDoc, sig?.treasurer?.signatureUrl) },
   ];
   const showSignatories = signers.some((s) => s.name || s.image);
-  const pageHeight = Math.max(MIN_HEIGHT, 440 + rowsHeight + (showSignatories ? 135 : 0));
+  const pageHeight = Math.max(MIN_HEIGHT, 440 + rowsHeight + (showSignatories ? 135 : 0) + (data.verifyUrl ? QR_BLOCK_HEIGHT : 0));
   const page = pdfDoc.addPage([PAGE_WIDTH, pageHeight]);
 
   // Flag-coloured band across the top (green / gold / red, like the SRC letterhead).
@@ -204,7 +233,7 @@ export async function generateReceiptPdf(data: ReceiptPdfData): Promise<Uint8Arr
   y -= 44;
   centered(page, BRANDING.enquiry, y, 8, font, INK);
   centered(page, `Follow us @umat_srid_src   |   ${BRANDING.website}`, y - 12, 8, font, MUTED);
-  centered(page, "This is a computer-generated receipt and does not require a physical signature.", 22, 7.5, font, MUTED);
+  if (data.verifyUrl) await drawVerifyQr(pdfDoc, page, data.verifyUrl, bold);
 
   return pdfDoc.save();
 }

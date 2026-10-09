@@ -6,6 +6,6 @@ export const BRANDING = {
   campus: "ESSIKADO CAMPUS",
   receiptSubtitle: "SRC Branded PPEs, Engineering Drawing Board, Set-squares & Engineering Sets",
   enquiry: "For any enquiry, call Obed Tandoh (Essikado Treasurer) 0502565663",
-  website: "www.umatsrc.com",
+  website: "umatsridsrc.com",
   smsFallbackSender: "UMaTSRC",
 } as const;
