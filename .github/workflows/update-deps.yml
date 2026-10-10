@@ -1,0 +1,74 @@
+name: Update dependencies
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"   # weekly, Monday 06:00 UTC. Delete to run manually only.
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy value so prisma generate can load prisma.config.ts in CI
+      DATABASE_URL: postgresql://user:pass@localhost:5432/db
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Update all dependencies to latest
+        run: |
+          npx --yes npm-check-updates -u
+          npm install
+          npm install dotenv
+
+      - name: Prisma 7 setup (idempotent)
+        run: |
+          # Remove url/directUrl/shadowDatabaseUrl from the datasource block
+          sed -i '/^datasource/,/^}/{/^\s*\(url\|directUrl\|shadowDatabaseUrl\)\s*=/d}' prisma/schema.prisma
+
+          # Create prisma.config.ts if it doesn't exist
+          if [ ! -f prisma.config.ts ]; then
+            cat > prisma.config.ts <<'EOF'
+          import "dotenv/config";
+          import { defineConfig, env } from "prisma/config";
+
+          export default defineConfig({
+            schema: "prisma/schema.prisma",
+            migrations: {
+              path: "prisma/migrations",
+            },
+            datasource: {
+              url: env("DATABASE_URL"),
+            },
+          });
+          EOF
+            sed -i 's/^          //' prisma.config.ts
+          fi
+
+          npx prisma generate
+
+      - name: Verify (does not block the PR)
+        id: verify
+        continue-on-error: true
+        run: |
+          npx tsc --noEmit
+          npm run build
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/update-deps
+          commit-message: "chore: update dependencies and migrate to Prisma 7"
+          title: "chore: update dependencies and migrate to Prisma 7"
+          body: |
+            - Updated all dependencies to latest
+            - Added `prisma.config.ts` and removed `url` from the `schema.prisma` datasource
+            
+            Typecheck/build result: **${{ steps.verify.outcome }}**
