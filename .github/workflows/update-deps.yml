@@ -2,8 +2,16 @@ name: Update dependencies
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: "How far to bump"
+        type: choice
+        options:
+          - latest   # everything, including majors
+          - minor    # minor/patch only
+        default: latest
   schedule:
-    - cron: "0 6 * * 1"   # weekly, Monday 06:00 UTC. Delete to run manually only.
+    - cron: "0 6 * * 1"   # weekly runs use minor (see TARGET below)
 
 permissions:
   contents: write
@@ -13,8 +21,8 @@ jobs:
   update:
     runs-on: ubuntu-latest
     env:
-      # Dummy value so prisma generate can load prisma.config.ts in CI
       DATABASE_URL: postgresql://user:pass@localhost:5432/db
+      TARGET: ${{ github.event.inputs.target || 'minor' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,18 +30,19 @@ jobs:
         with:
           node-version: 22
 
-      - name: Update all dependencies to latest
+      - name: Update dependencies
         run: |
-          npx --yes npm-check-updates -u
-          npm install
-          npm install dotenv
+          npx --yes npm-check-updates -u --target "$TARGET"
+          # --ignore-scripts so postinstall (prisma generate) waits for the Prisma 7 setup
+          npm install --ignore-scripts
+          npm install --ignore-scripts dotenv pg @prisma/adapter-pg
+          # deprecated stub, bcryptjs 3 ships its own types
+          npm uninstall --ignore-scripts @types/bcryptjs || true
 
-      - name: Prisma 7 setup (idempotent)
+      - name: Prisma 7 setup
         run: |
-          # Remove url/directUrl/shadowDatabaseUrl from the datasource block
           sed -i '/^datasource/,/^}/{/^\s*\(url\|directUrl\|shadowDatabaseUrl\)\s*=/d}' prisma/schema.prisma
 
-          # Create prisma.config.ts if it doesn't exist
           if [ ! -f prisma.config.ts ]; then
             cat > prisma.config.ts <<'EOF'
           import "dotenv/config";
@@ -49,7 +58,6 @@ jobs:
             },
           });
           EOF
-            sed -i 's/^          //' prisma.config.ts
           fi
 
           npx prisma generate
@@ -65,10 +73,11 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           branch: chore/update-deps
-          commit-message: "chore: update dependencies and migrate to Prisma 7"
-          title: "chore: update dependencies and migrate to Prisma 7"
+          commit-message: "chore: update dependencies (${{ env.TARGET }}) and migrate to Prisma 7"
+          title: "chore: update dependencies (${{ env.TARGET }}) and migrate to Prisma 7"
           body: |
-            - Updated all dependencies to latest
-            - Added `prisma.config.ts` and removed `url` from the `schema.prisma` datasource
-            
+            - Dependency bump target: **${{ env.TARGET }}**
+            - Added `prisma.config.ts`, removed `url` from the `schema.prisma` datasource
+            - Added `pg` and `@prisma/adapter-pg` (required by Prisma 7)
+
             Typecheck/build result: **${{ steps.verify.outcome }}**
